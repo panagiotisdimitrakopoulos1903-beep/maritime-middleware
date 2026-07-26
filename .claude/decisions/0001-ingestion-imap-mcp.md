@@ -11,7 +11,7 @@ into the parsing and matching pipeline. Two ingestion paths were built:
 
 1. **Postfix Milter** (`middleware/milter/hook.py`) — intercepts mail
    server-side before delivery to WT3.
-2. **AutoHotkey WT3 watcher** (`middleware_trigger/`) — watches the WT3
+2. **AutoHotkey WT3 watcher** (`middleware_frontend/trigger/wt3_watcher.ahk`) — watches the WT3
    Windows client and POSTs clipboard content to `POST /internal/ingest`.
 
 The original project pitch proposed a different model: Claude reads the WT3

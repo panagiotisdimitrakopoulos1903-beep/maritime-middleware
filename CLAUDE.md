@@ -225,7 +225,6 @@ Route resolution to `architect` unless noted otherwise.
 | Question | Source | Notes |
 |---|---|---|
 | IMAP UID stability as the `source_message_id` dedup key on a real (non-mock) mailbox — a `UIDVALIDITY` reset could reassign UIDs and defeat dedup | ADR 0002, Open questions #1 | Not a blocker for `IMAP_MODE=mock` or initial live rollout; flag to `debug` to test against the real WT3 mailbox before go-live. Consider hashing `Message-ID` if it becomes an issue |
-| AHK trigger's (`middleware_trigger/`) long-term fate — retire once IMAP MCP is production-ready, or keep as fallback | ADR 0001, Open questions #2; restated ADR 0002, Open questions #2 | Unaffected by ADR 0002/0003 |
 | Whether `_broadcast_new_matches` should batch multiple pending payloads if several orders complete in a tight window | ADR 0003, Open questions #1 | Low priority — current single-mailbox poll rate makes this a non-issue in practice |
 | Whether the Electron panel needs a missed-broadcast recovery path (e.g. catch up via `/orders/latest` on reconnect) | ADR 0003, Open questions #2 | Low priority — not in scope of the ADR 0003 fix, which restores real-time delivery only |
 
@@ -257,6 +256,14 @@ logic. Confirmed present before, and untouched by, ADR 0002/0003 and the
 `asyncio.get_event_loop()` call behaves correctly when `_process_inbound`
 runs on an APScheduler worker thread) is resolved by ADR 0003 — see the MCP
 servers section above. Not carried forward as open.
+
+**Resolved (2026-07-26):** AHK trigger's long-term fate (ADR 0001, Open
+questions #2; restated ADR 0002, Open questions #2) — retired outright.
+IMAP MCP is production-ready (ADR 0002, fully implemented and tested), so
+the AHK fallback is no longer needed; it's dead code in the same category
+as `middleware/milter/hook.py`. The file
+(`middleware_frontend/trigger/wt3_watcher.ahk`) has been deleted. IMAP MCP
+is the sole ingestion path per ADR 0001; no client-side fallback remains.
 
 ## Five-agent system
 
