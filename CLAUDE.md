@@ -53,13 +53,35 @@ Built and confirmed working in mock mode (smoke test passed 2026-07-26):
 
 Configured in `~/.claude/claude_desktop_config.json` for interactive/agentic
 use (briefing, debug, ad-hoc mailbox/tonnage inspection). **Wiring into the
-FastAPI pipeline is decided** (2026-07-26):
+FastAPI pipeline is implemented** (decided and built 2026-07-26):
 `.claude/decisions/0002-mcp-ingestion-pipeline-wiring.md`. Production
-ingestion is a new APScheduler job (`scheduler/jobs.py`) that calls the same
-`mock_inbox.py`/`imap_client.py` module directly (not over MCP stdio) and
-feeds the existing `_process_inbound` pipeline — no agentic loop in the
-production path. `get_tonnage_list`/`signal_server.py` remain
-interactive-only; the match path still reads only `cached_vessels`.
+ingestion is a new APScheduler job (`scheduler/jobs.py::_poll_imap_inbox`)
+that calls the same `mock_inbox.py`/`imap_client.py` module directly (not
+over MCP stdio), dedupes against a new `source_message_id` column on
+`inbound_orders`, and feeds the existing `_process_inbound` pipeline — no
+agentic loop in the production path. Tested in
+`middleware/tests/test_scheduler_jobs.py`, committed. `get_tonnage_list`/
+`signal_server.py` remain interactive-only; the match path still reads only
+`cached_vessels`.
+
+A related bug — `_push_to_websockets` silently dropping `NEW_MATCHES`
+pushes and wrongly evicting healthy sockets when invoked from a worker
+thread (affects both the `/internal/ingest` path and the new poller, and
+predates both) — is now fixed per
+`.claude/decisions/0003-websocket-broadcast-thread-safety.md`: the main
+event loop is captured at FastAPI `lifespan` startup and all broadcasts are
+routed through it via `run_coroutine_threadsafe`. Implemented and tested
+(`middleware/tests/test_scheduler_jobs.py::TestPushToWebsocketsFromWorkerThread`,
+6 tests), committed.
+
+`signal_server.py`'s `SIGNAL_MODE=live` backend (`middleware/mcp/signal_client.py`)
+was broken (see ADR 0002's Context) and has since been fixed — correct
+settings field name, correct session/engine imports, real `signal-ocean`
+SDK method/field names — with 22 tests added
+(`middleware/tests/test_signal_client_mcp.py`). Three of those fixes are
+unverified judgment calls that block trusting `SIGNAL_MODE=live` in
+production; see [Open questions and blockers](#open-questions-and-blockers)
+below.
 
 ### Legacy code (retiring, do not extend)
 
@@ -70,12 +92,18 @@ middleware/milter/  Postfix Milter hook — RETIRING, do not extend
 **Postfix Milter** (`middleware/milter/hook.py`) was server-side mail
 interception via `smtpd_milters`. Not part of the target architecture.
 See `.claude/decisions/0001-ingestion-imap-mcp.md`. Use IMAP MCP or seed
-data / manual `POST /internal/ingest` for local dev.
+data / manual `POST /internal/ingest` for local dev. The `pymilter`
+dependency has been removed from `middleware/requirements.txt` (2026-07-26
+— it doesn't build in this environment and nothing in the current
+architecture calls it); the `middleware/milter/` code itself is untouched
+and still not deployed.
 
 ### Processing pipeline (`middleware/api/app.py::_process_inbound`)
 
 Runs as a FastAPI `BackgroundTask` after `POST /internal/ingest` returns
-`202` immediately:
+`202` immediately, or from the APScheduler `_poll_imap_inbox` job
+(`scheduler/jobs.py`, ADR 0002) on each poll interval — both call sites
+invoke the same `_process_inbound` function from a worker thread:
 
 1. **Parse** — `parser/llm_parser.py::parse_message()`. Direct call to the
    Anthropic Python SDK (`anthropic.Anthropic`, not an MCP tool call), one
@@ -98,7 +126,10 @@ Runs as a FastAPI `BackgroundTask` after `POST /internal/ingest` returns
    denormalised (vessel snapshot copied in) so history survives cache
    changes.
 5. **Push** — `NEW_MATCHES` JSON payload broadcast to every connected
-   `/ws` WebSocket client (the Electron panel).
+   `/ws` WebSocket client (the Electron panel), via
+   `run_coroutine_threadsafe` onto the main event loop captured at
+   `lifespan` startup (ADR 0003) — safe to call from either worker-thread
+   call site above.
 
 ### Matching engine (`middleware/matching/engine.py`)
 
@@ -178,12 +209,54 @@ MCP so Claude reads the WT3 mailbox.
 | Ingestion | IMAP MCP server, Claude reads inbox | Milter → REST `/internal/ingest` (legacy, retiring) | **IMAP MCP** — built in `middleware/mcp/`, mock mode confirmed |
 | Signal Ocean | Signal Ocean MCP server | Direct `signal-ocean` SDK, Postgres cache + `signal_server.py` MCP | MCP server built; backend cache path unchanged for now |
 | UI | Full WT3 UI clone | Companion Electron panel beside WT3 | Unchanged — companion panel, not a clone |
-| Claude's role | Agentic loop with MCP tool access | One-shot SDK call in `llm_parser.py` | **Decided** (ADR 0002) — one-shot `llm_parser.py` stays; MCP is interactive-only, not the production ingestion loop |
+| Claude's role | Agentic loop with MCP tool access | One-shot SDK call in `llm_parser.py` | **Implemented** (ADR 0002, decided and built 2026-07-26) — one-shot `llm_parser.py` stays; MCP is interactive-only, not the production ingestion loop |
 | Five-agent system | Five specialized agents | `.claude/agents/` (5 agents) | In progress |
 
-Remaining open questions (not yet ADR'd): IMAP UID stability as the dedup
-key on live mailboxes, and the AHK trigger's long-term fate (see ADR 0001 and
-ADR 0002 "Open questions"). Route these to `architect` before implementation.
+See [Open questions and blockers](#open-questions-and-blockers) below for
+what's still unresolved across ADRs 0001–0003.
+
+## Open questions and blockers
+
+Consolidated here so they're discoverable without re-reading every ADR.
+Route resolution to `architect` unless noted otherwise.
+
+**Still open:**
+
+| Question | Source | Notes |
+|---|---|---|
+| IMAP UID stability as the `source_message_id` dedup key on a real (non-mock) mailbox — a `UIDVALIDITY` reset could reassign UIDs and defeat dedup | ADR 0002, Open questions #1 | Not a blocker for `IMAP_MODE=mock` or initial live rollout; flag to `debug` to test against the real WT3 mailbox before go-live. Consider hashing `Message-ID` if it becomes an issue |
+| AHK trigger's (`middleware_trigger/`) long-term fate — retire once IMAP MCP is production-ready, or keep as fallback | ADR 0001, Open questions #2; restated ADR 0002, Open questions #2 | Unaffected by ADR 0002/0003 |
+| Whether `_broadcast_new_matches` should batch multiple pending payloads if several orders complete in a tight window | ADR 0003, Open questions #1 | Low priority — current single-mailbox poll rate makes this a non-issue in practice |
+| Whether the Electron panel needs a missed-broadcast recovery path (e.g. catch up via `/orders/latest` on reconnect) | ADR 0003, Open questions #2 | Low priority — not in scope of the ADR 0003 fix, which restores real-time delivery only |
+
+**Blocking `SIGNAL_MODE=live` production trust** — no real Signal Ocean API
+key has been available to verify any of these three judgment calls made
+while fixing `middleware/mcp/signal_client.py`; see
+`middleware/tests/test_signal_client_mcp.py`'s header comment for full
+reasoning:
+
+- `refresh()`'s `loading_port` argument to `get_tonnage_list()` uses an
+  arbitrary anchor port resolved from `get_ports()` (the wrapper's own
+  signature has no caller-supplied port) — whether this yields
+  correct/complete tonnage list results from the real API is unverified.
+- `get_distances()` defaults `loading_condition_id` to `BALLAST` (reasoning:
+  a vessel's open position implies sailing to load empty) — a design guess,
+  not verified against real API output or domain expertise.
+- `get_distances()` hardcodes vessel_class to `"Aframax"` as a stand-in,
+  since the wrapper's own signature has no vessel-class parameter
+  (reasoning: distance is geography-dominated, not class-dominated) — also
+  unverified.
+
+**Known failing test, pre-existing and unrelated to today's work:**
+`middleware/tests/test_core.py::TestDateOverlapScore::test_vessel_opens_day_of_laycan`
+has been failing throughout, in `matching/engine.py`'s date-overlap scoring
+logic. Confirmed present before, and untouched by, ADR 0002/0003 and the
+`signal_client.py` fixes. Not yet investigated — needs a `debug` pass.
+
+**Resolved:** ADR 0002's Open questions #3 (whether `_push_to_websockets`'s
+`asyncio.get_event_loop()` call behaves correctly when `_process_inbound`
+runs on an APScheduler worker thread) is resolved by ADR 0003 — see the MCP
+servers section above. Not carried forward as open.
 
 ## Five-agent system
 
@@ -204,8 +277,12 @@ orders + match activity, reads from `/orders/latest` and `/status`).
 - `MatchResult` rows denormalise vessel data at match time on purpose (for
   audit history as the cache changes) — don't "normalize" this into a
   foreign-key-only relationship.
-- Tests live in `middleware/tests/test_core.py` only so far — parser LLM
-  calls and legacy Milter hook have no automated coverage.
+- Tests now span three files: `middleware/tests/test_core.py` (matching
+  engine/scoring), `test_scheduler_jobs.py` (IMAP poll dedup and the
+  cross-thread websocket broadcast fix, ADR 0002/0003), and
+  `test_signal_client_mcp.py` (Signal Ocean MCP `SIGNAL_MODE=live` field
+  mapping, 22 tests). Parser LLM calls (`llm_parser.py`) and the legacy
+  Milter hook still have no automated coverage.
 - `middleware/milter/` is **retiring** per ADR 0001 — do not extend it;
   new ingestion work goes toward IMAP MCP.
 
