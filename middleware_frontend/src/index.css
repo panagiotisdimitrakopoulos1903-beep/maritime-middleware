@@ -1,0 +1,133 @@
+/* src/index.css — global styles */
+
+/* ── Design tokens ──────────────────────────────────────────────────────────── */
+:root {
+  /* Surfaces — deep navy/charcoal inspired by nautical chart colours */
+  --bg-base:       #0d1117;   /* outermost background */
+  --bg-panel:      #161c24;   /* panel cards */
+  --bg-elevated:   #1e2733;   /* hover / selected states */
+  --bg-input:      #1a2230;
+
+  /* Accents — single amber signal light, used sparingly */
+  --accent:        #e8a020;   /* amber — the one bold colour */
+  --accent-dim:    #7a4e08;
+  --accent-glow:   rgba(232,160,32,0.12);
+
+  /* Semantic */
+  --green:         #2ea043;
+  --green-dim:     #0d3320;
+  --red:           #da3633;
+  --red-dim:       #3d0c0b;
+  --amber:         #d29922;
+  --amber-dim:     #3d2b00;
+  --blue:          #388bfd;
+
+  /* Text */
+  --text-primary:  #e6edf3;
+  --text-secondary:#8b949e;
+  --text-muted:    #484f58;
+  --text-accent:   #e8a020;
+
+  /* Borders */
+  --border:        #21262d;
+  --border-strong: #30363d;
+
+  /* Score bar colours by range */
+  --score-high:    #2ea043;
+  --score-mid:     #d29922;
+  --score-low:     #da3633;
+
+  /* Typography */
+  --font-mono:     'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-sans:     -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* Spacing */
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  --gap-lg: 16px;
+  --gap-xl: 24px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+}
+
+/* ── Reset ──────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Typography utilities ───────────────────────────────────────────────────── */
+.mono   { font-family: var(--font-mono); }
+.muted  { color: var(--text-secondary); }
+.accent { color: var(--text-accent); }
+.label  {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ── Confidence badges ──────────────────────────────────────────────────────── */
+.badge-ok     { background: var(--green-dim);  color: var(--green);  }
+.badge-warn   { background: var(--amber-dim);  color: var(--amber);  }
+.badge-error  { background: var(--red-dim);    color: var(--red);    }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────────── */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.animate-in {
+  animation: fadeSlideIn 0.2s ease-out both;
+}
+
+/* ── Skeleton loader ────────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 25%,
+    var(--bg-panel) 50%,
+    var(--bg-elevated) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-sm);
+}

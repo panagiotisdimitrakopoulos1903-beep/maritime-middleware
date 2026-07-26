@@ -1,0 +1,40 @@
+{
+  "name": "maritime-middleware-panel",
+  "version": "1.0.0",
+  "description": "Maritime broker deal matching panel",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "concurrently \"npm run react\" \"wait-on http://localhost:3000 && electron .\"",
+    "react": "react-scripts start",
+    "build": "react-scripts build",
+    "dist": "npm run build && electron-builder",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.maritime.middleware",
+    "productName": "Maritime Panel",
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  },
+  "browserslist": {
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version"]
+  }
+}

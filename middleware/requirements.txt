@@ -1,0 +1,34 @@
+# Core
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+websockets==12.0
+pydantic==2.7.1
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
+
+# Database
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# LLM Parsing
+anthropic==0.26.0
+
+# Signal Ocean SDK
+signal-ocean==2.4.0
+
+# Mail interception
+pymilter==1.0.4
+
+# Scheduling
+apscheduler==3.10.4
+
+# Filesystem watching (fallback trigger)
+watchdog==4.0.0
+
+# Utilities
+httpx==0.27.0
+python-dateutil==2.9.0
+pytz==2024.1
+structlog==24.1.0
+tenacity==8.3.0
