@@ -2,8 +2,8 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 websockets==12.0
-pydantic==2.7.1
-pydantic-settings==2.2.1
+pydantic==2.7.2
+pydantic-settings==2.5.2
 python-dotenv==1.0.1
 
 # Database
@@ -15,10 +15,15 @@ alembic==1.13.1
 anthropic==0.26.0
 
 # Signal Ocean SDK
-signal-ocean==2.4.0
+# numpy pinned <2 because signal-ocean 2.1.1 requires pandas<2, and
+# pandas 1.5.3's compiled wheel is ABI-incompatible with numpy>=2.0
+# (crashes on import, not just a pip resolution error) — see requirements.txt
+# clean-install verification notes.
+numpy==1.26.4
+signal-ocean==2.1.1
 
-# Mail interception
-pymilter==1.0.4
+# MCP SDK (imap_server.py, signal_server.py)
+mcp==1.10.0
 
 # Scheduling
 apscheduler==3.10.4
