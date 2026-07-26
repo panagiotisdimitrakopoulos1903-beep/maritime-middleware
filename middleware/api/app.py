@@ -8,6 +8,8 @@ Endpoints:
   GET  /status               — system health (cache age, vessel count)
   WS   /ws                   — WebSocket push to Electron panel
 """
+import asyncio
+import concurrent.futures
 import uuid
 import structlog
 from contextlib import asynccontextmanager
@@ -36,6 +38,7 @@ log = structlog.get_logger()
 engine = get_engine(settings.database_url)
 matching_engine = MatchingEngine()
 active_websockets: list[WebSocket] = []
+_main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -44,6 +47,8 @@ active_websockets: list[WebSocket] = []
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
     log.info("app.starting")
+    global _main_event_loop
+    _main_event_loop = asyncio.get_running_loop()
     create_tables(engine)
     start_scheduler()
     yield
@@ -275,19 +280,45 @@ def _push_to_websockets(
         "signal_last_refreshed": last_refresh.isoformat() if last_refresh else None,
     }
 
-    import asyncio
-    import json
+    if _main_event_loop is None or _main_event_loop.is_closed():
+        log.warning("websocket.broadcast_skipped", reason="no_main_event_loop")
+        return
+
+    try:
+        future = asyncio.run_coroutine_threadsafe(
+            _broadcast_new_matches(payload), _main_event_loop
+        )
+    except RuntimeError as e:
+        log.warning("websocket.broadcast_schedule_failed", error=str(e))
+        return
+
+    future.add_done_callback(_log_broadcast_outcome)
+
+
+async def _broadcast_new_matches(payload: dict) -> None:
+    """
+    Send `payload` to every connected Electron panel.
+
+    Must only ever be invoked via `asyncio.run_coroutine_threadsafe` targeting
+    `_main_event_loop` — never called directly — so all reads/writes of
+    `active_websockets` happen on the main loop thread, which is what makes
+    this safe to run alongside `websocket_endpoint`'s connect/disconnect
+    handling without a lock (confinement, not locking).
+    """
     dead = []
     for ws in active_websockets:
         try:
-            asyncio.run_coroutine_threadsafe(
-                ws.send_json(payload),
-                asyncio.get_event_loop()
-            )
+            await ws.send_json(payload)
         except Exception:
             dead.append(ws)
     for ws in dead:
         active_websockets.remove(ws)
+
+
+def _log_broadcast_outcome(future: concurrent.futures.Future) -> None:
+    """Logging-only done-callback for a scheduled broadcast. Must not raise."""
+    if future.exception() is not None:
+        log.error("websocket.broadcast_failed", error=str(future.exception()))
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
