@@ -43,19 +43,11 @@ npm run dist
 Produces a Windows installer in `dist/`. One-click install, no Node.js required
 on the broker's machine.
 
-## WT3 click trigger
+## Ingestion
 
-Run the AutoHotkey script alongside the panel:
-
-```
-trigger/wt3_watcher.ahk
-```
-
-Requires AutoHotkey v2: https://www.autohotkey.com
-
-The script monitors the WT3 window. When the broker selects and copies a
-message (Ctrl+C), it instantly POSTs the text to the backend for parsing
-and matching. Results appear in the panel within ~150ms.
+No manual step is needed for messages to arrive. The backend polls the WT3
+mailbox itself via the IMAP MCP poller (ADR 0002) and pushes new matches to
+the panel over WebSocket as soon as they're ready.
 
 ## Layout
 
@@ -107,7 +99,4 @@ src/
 
   lib/
     api.js          HTTP + WebSocket client for Python backend
-
-trigger/
-  wt3_watcher.ahk  AutoHotkey — WT3 click detection
 ```
