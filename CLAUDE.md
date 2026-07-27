@@ -210,7 +210,7 @@ MCP so Claude reads the WT3 mailbox.
 | Signal Ocean | Signal Ocean MCP server | Direct `signal-ocean` SDK, Postgres cache + `signal_server.py` MCP | MCP server built; backend cache path unchanged for now |
 | UI | Full WT3 UI clone | Companion Electron panel beside WT3 | Unchanged — companion panel, not a clone |
 | Claude's role | Agentic loop with MCP tool access | One-shot SDK call in `llm_parser.py` | **Implemented** (ADR 0002, decided and built 2026-07-26) — one-shot `llm_parser.py` stays; MCP is interactive-only, not the production ingestion loop |
-| Five-agent system | Five specialized agents | `.claude/agents/` (5 agents) | In progress |
+| Five-agent system | Five specialized agents | `.claude/agents/` (5 agents) | **Implemented** — `architect` (ADR 0002/0003), `coder` (both ADRs built, `signal_client.py` fixes, `requirements.txt`, doc cleanup), `debug` (`test_scheduler_jobs.py`, `test_signal_client_mcp.py`), and `ceo` (this file, repeatedly) have produced verifiable output today; `briefing` has not yet been exercised — no daily-summary artifacts or commits attributable to it exist in the repo |
 
 See [Open questions and blockers](#open-questions-and-blockers) below for
 what's still unresolved across ADRs 0001–0003.
@@ -224,8 +224,8 @@ Route resolution to `architect` unless noted otherwise.
 
 | Question | Source | Notes |
 |---|---|---|
-| IMAP UID stability as the `source_message_id` dedup key on a real (non-mock) mailbox — a `UIDVALIDITY` reset could reassign UIDs and defeat dedup | ADR 0002, Open questions #1 | Not a blocker for `IMAP_MODE=mock` or initial live rollout; flag to `debug` to test against the real WT3 mailbox before go-live. Consider hashing `Message-ID` if it becomes an issue |
-| Whether `_broadcast_new_matches` should batch multiple pending payloads if several orders complete in a tight window | ADR 0003, Open questions #1 | Low priority — current single-mailbox poll rate makes this a non-issue in practice |
+| IMAP UID stability as the `source_message_id` dedup key on a real (non-mock) mailbox — `middleware/mcp/imap_client.py` supplies the UID as the id, `scheduler/jobs.py::_poll_imap_inbox` dedupes against it via `InboundOrder.source_message_id`; a `UIDVALIDITY` reset on the broker's mail server could reassign UIDs and defeat dedup | ADR 0002, Open questions #1 | Not a blocker for `IMAP_MODE=mock` (fixed ids) or initial live rollout; resolved once `debug` tests against the real WT3 mailbox before go-live and confirms UID reuse doesn't occur across a `UIDVALIDITY` reset — or `imap_client.py` is changed to hash the `Message-ID` header as a more robust key instead |
+| Whether `middleware/api/app.py::_broadcast_new_matches` should batch multiple pending payloads if several orders complete in a very tight window, rather than scheduling one coroutine per order | ADR 0003, Open questions #1 | Not addressed in ADR 0003 — current ingestion rate (one broker mailbox, `imap_poll_interval_minutes=2`) makes this a non-issue in practice; revisit only if push volume grows |
 | Whether the Electron panel needs a missed-broadcast recovery path (e.g. catch up via `/orders/latest` on reconnect) | ADR 0003, Open questions #2 | Low priority — not in scope of the ADR 0003 fix, which restores real-time delivery only |
 
 **Blocking `SIGNAL_MODE=live` production trust** — no real Signal Ocean API
