@@ -119,6 +119,15 @@ def _poll_imap_inbox():
                 msg["raw_body"],
                 uuid.uuid4(),
                 source_message_id=msg["id"],
+                # RFC 2822 threading headers (ADR 0004, Decision #3) — use
+                # .get() defensively since not every message carries all
+                # three (only replies set In-Reply-To/References, and
+                # imap_client.py/mock_inbox.py return None for absent
+                # headers rather than omitting the key, but .get() stays
+                # safe even if a source ever omits the key entirely).
+                message_id=msg.get("message_id"),
+                in_reply_to=msg.get("in_reply_to"),
+                references=msg.get("references"),
             )
 
         log.info(

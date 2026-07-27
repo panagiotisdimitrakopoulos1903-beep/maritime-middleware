@@ -37,6 +37,20 @@ class InboundOrder(Base):
     # repeated polls of the same mailbox. Null for Milter-era / manual rows.
     source_message_id = Column(String(255), unique=True, nullable=True)
 
+    # RFC 2822 threading headers (ADR 0004, Decision #3). message_id is the
+    # message's own Message-ID header (not to be confused with
+    # source_message_id above, which is the IMAP UID / mock id used for
+    # dedup); in_reply_to/references are only present on replies. thread_id
+    # is computed at ingest time (see api/app.py::_process_inbound): reused
+    # from the matching parent row if in_reply_to matches an existing
+    # message_id, otherwise a new thread starts here. Not unique — unlike
+    # source_message_id, nothing here needs to enforce uniqueness at the DB
+    # level.
+    message_id = Column(String(255), nullable=True)
+    in_reply_to = Column(String(255), nullable=True)
+    references = Column(Text, nullable=True)
+    thread_id = Column(String(255), nullable=True)
+
     # Parsed structured fields
     cargo_type = Column(String(100))
     quantity_mt = Column(Float)
@@ -75,6 +89,8 @@ class InboundOrder(Base):
         Index("ix_inbound_orders_cargo_type", "cargo_type"),
         Index("ix_inbound_orders_load_port_canonical", "load_port_canonical"),
         Index("ix_inbound_orders_source_message_id", "source_message_id"),
+        Index("ix_inbound_orders_message_id", "message_id"),
+        Index("ix_inbound_orders_thread_id", "thread_id"),
     )
 
 

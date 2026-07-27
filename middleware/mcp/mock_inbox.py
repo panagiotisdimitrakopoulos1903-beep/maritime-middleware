@@ -30,6 +30,9 @@ MOCK_EMAILS = [
             "otherwise as main terms\n"
             "pls advise avails"
         ),
+        "message_id": "<mock-0001.20260726T010000@graintraders-eu.com>",
+        "in_reply_to": None,
+        "references": None,
     },
     {
         "id": "mock-0002",
@@ -44,6 +47,9 @@ MOCK_EMAILS = [
             "aframax pref\n"
             "rgds"
         ),
+        "message_id": "<mock-0002.20260725T230000@petrochem-shipping.com>",
+        "in_reply_to": None,
+        "references": None,
     },
     {
         "id": "mock-0003",
@@ -57,6 +63,9 @@ MOCK_EMAILS = [
             "handymax stem\n"
             "any avails appreciated"
         ),
+        "message_id": "<mock-0003.20260725T210000@coastalgrain.co.uk>",
+        "in_reply_to": None,
+        "references": None,
     },
     {
         "id": "mock-0004",
@@ -70,19 +79,29 @@ MOCK_EMAILS = [
             "capesize\n"
             "pls send options"
         ),
+        "message_id": "<mock-0004.20260725T180000@atlantic-bulkers.com>",
+        "in_reply_to": None,
+        "references": None,
     },
     {
+        # Reply to mock-0002 — exercises thread-grouping logic end to end
+        # (ADR 0004, Decision #3 build item #2): in_reply_to here matches
+        # mock-0002's message_id, so ingest-time thread_id computation
+        # should fold this row into mock-0002's thread rather than starting
+        # a new one. references carries the same id, per RFC 2822 §3.6.4
+        # (a single-id reference chain is the common case for a first
+        # reply).
         "id": "mock-0005",
         "sender": "desk3@euro-tankers.com",
-        "subject": "RE: 130k crude WAF/USG",
+        "subject": "RE: ENQ - 80,000mt Crude Ras Tanura / Rotterdam",
         "received_at": _hours_ago(20),
         "raw_body": (
-            "130k crude\n"
-            "waf loading / usg disch\n"
-            "lc aug 25-31\n"
-            "suezmax\n"
-            "let us know what's open"
+            "re below - can offer aframax open ras tanura early aug\n"
+            "let us know if still workable"
         ),
+        "message_id": "<mock-0005.20260725T060000@euro-tankers.com>",
+        "in_reply_to": "<mock-0002.20260725T230000@petrochem-shipping.com>",
+        "references": "<mock-0002.20260725T230000@petrochem-shipping.com>",
     },
 ]
 

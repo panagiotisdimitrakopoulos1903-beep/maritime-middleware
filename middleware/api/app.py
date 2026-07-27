@@ -77,6 +77,9 @@ class IngestRequest(BaseModel):
     subject: str
     raw_body: str
     source_message_id: Optional[str] = None
+    message_id: Optional[str] = None
+    in_reply_to: Optional[str] = None
+    references: Optional[str] = None
 
 
 class MatchResponse(BaseModel):
@@ -120,12 +123,52 @@ class StatusResponse(BaseModel):
 
 # ── Core processing pipeline ──────────────────────────────────────────────────
 
+def _compute_thread_id(
+    session: Session,
+    message_id: Optional[str],
+    in_reply_to: Optional[str],
+) -> str:
+    """
+    Determine this message's thread_id (ADR 0004, Decision #3).
+
+    Minimum viable version: match `in_reply_to` against existing
+    `InboundOrder.message_id` values only. Deliberately does NOT chain-walk
+    the `references` header (which may list the entire reply chain, RFC
+    2822 §3.6.4) — for a first reply, `in_reply_to` and the last id in
+    `references` are the same value, so the only case this simplification
+    misses is a message whose `in_reply_to` is missing/stale but whose
+    `references` chain would still resolve to an existing thread (e.g. a
+    mail client that drops In-Reply-To but keeps References). That's judged
+    out of scope for this slice; see ADR 0004 open question #3, which
+    separately flags backfill/out-of-order delivery as unaddressed here.
+
+    If `in_reply_to` matches an existing row's `message_id`, this message
+    joins that row's thread. Otherwise it starts a new thread, identified by
+    its own `message_id` — or, if `message_id` itself is absent (a message
+    with no Message-ID header at all, which real mail clients essentially
+    never produce but mock/manual ingest paths could), a freshly generated
+    UUID so every row still has a non-null thread_id.
+    """
+    if in_reply_to:
+        parent = (
+            session.query(InboundOrder.thread_id)
+            .filter(InboundOrder.message_id == in_reply_to)
+            .first()
+        )
+        if parent and parent[0]:
+            return parent[0]
+    return message_id or str(uuid.uuid4())
+
+
 def _process_inbound(
     sender: str,
     subject: str,
     raw_body: str,
     order_id: uuid.UUID,
     source_message_id: Optional[str] = None,
+    message_id: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
 ):
     """
     Full processing pipeline:
@@ -137,6 +180,11 @@ def _process_inbound(
     `source_message_id` carries the IMAP UID / mock id through for
     MCP-sourced messages so the IMAP poller (scheduler/jobs.py) can dedupe
     repeated polls of the same mailbox. Milter-era / manual callers omit it.
+
+    `message_id`/`in_reply_to`/`references` are the RFC 2822 threading
+    headers (ADR 0004, Decision #3) — also optional, since not every
+    message carries them (only replies set In-Reply-To/References) and
+    manual/legacy callers may omit all three.
     """
     session: Session = get_session(engine)
     try:
@@ -146,12 +194,17 @@ def _process_inbound(
         parsed = parse_message(raw_body)
 
         # ── Step 2: Persist order ─────────────────────────────────────────────
+        thread_id = _compute_thread_id(session, message_id, in_reply_to)
         order_row = InboundOrder(
             id=order_id,
             sender=sender,
             subject=subject,
             raw_body=raw_body,
             source_message_id=source_message_id,
+            message_id=message_id,
+            in_reply_to=in_reply_to,
+            references=references,
+            thread_id=thread_id,
             cargo_type=str(parsed.cargo_type.value) if parsed.cargo_type.value else None,
             quantity_mt=float(parsed.quantity_mt.value) if parsed.quantity_mt.value else None,
             quantity_min_mt=float(parsed.quantity_min_mt.value) if parsed.quantity_min_mt.value else None,
@@ -339,6 +392,9 @@ async def ingest(req: IngestRequest, background_tasks: BackgroundTasks):
         req.raw_body,
         order_id,
         source_message_id=req.source_message_id,
+        message_id=req.message_id,
+        in_reply_to=req.in_reply_to,
+        references=req.references,
     )
     log.info("ingest.accepted", order_id=str(order_id))
     return {"order_id": str(order_id), "status": "accepted"}
@@ -440,6 +496,9 @@ async def get_latest_orders(limit: int = 20):
                 "discharge_port_canonical": order.discharge_port_canonical,
                 "parse_confidence": order.parse_confidence,
                 "has_low_confidence_fields": order.has_low_confidence_fields,
+                "message_id": order.message_id,
+                "in_reply_to": order.in_reply_to,
+                "thread_id": order.thread_id,
                 "top_match": {
                     "vessel_name": top_match.vessel_name,
                     "total_score": top_match.total_score,

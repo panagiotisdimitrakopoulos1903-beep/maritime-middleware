@@ -60,6 +60,19 @@ def _parse_message(uid: bytes, raw: bytes) -> dict:
         "subject": _decode(msg.get("Subject")),
         "received_at": received.isoformat(),
         "raw_body": _extract_plain_text(msg),
+        # RFC 2822 threading headers (ADR 0004, Decision #3). Only replies
+        # carry In-Reply-To/References — msg.get() returns None gracefully
+        # when a header is absent, which is exactly the behavior we want
+        # here rather than raising or defaulting to "". Message-ID/
+        # In-Reply-To are typically a single angle-bracketed token, so
+        # _decode (built for RFC 2047 encoded-word headers like Subject/
+        # From) is unnecessary here; these headers are plain ASCII per
+        # RFC 2822 and are returned as raw strings. References may contain
+        # a space-separated list of ids (RFC 2822 §3.6.4) — captured as the
+        # raw string, not parsed/split, per this slice's scope.
+        "message_id": msg.get("Message-ID"),
+        "in_reply_to": msg.get("In-Reply-To"),
+        "references": msg.get("References"),
     }
 
 
