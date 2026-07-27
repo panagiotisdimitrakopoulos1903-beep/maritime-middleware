@@ -110,7 +110,7 @@ def date_overlap_score(
 ) -> float:
     """
     Score how well the vessel's open date fits within the laycan window.
-    Best case: vessel opens 2-5 days before laycan start (positioning time).
+    Best case: vessel opens 0-7 days before laycan start (positioning time).
     """
     if not laycan_start or not laycan_end or not vessel_open_date:
         return 0.5

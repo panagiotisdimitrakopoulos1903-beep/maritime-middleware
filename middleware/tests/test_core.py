@@ -108,7 +108,7 @@ class TestDateOverlapScore:
             "2024-08-10", "2024-08-20",
             datetime(2024, 8, 10, tzinfo=timezone.utc)
         )
-        assert 0.7 < score <= 0.85
+        assert score == 1.0
 
     def test_vessel_opens_after_laycan_ends(self):
         score = date_overlap_score(
