@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # SIGNAL_MODE / IMAP_MODE live in .env but are read
+                          # directly via os.environ (see comments above), not
+                          # declared as Settings fields — don't reject them
 
 
 settings = Settings()

@@ -269,6 +269,25 @@ as `middleware/milter/hook.py`. The file
 (`middleware_frontend/trigger/wt3_watcher.ahk`) has been deleted. IMAP MCP
 is the sole ingestion path per ADR 0001; no client-side fallback remains.
 
+**Resolved (2026-07-28):** All four Alembic migrations (0001–0004, including
+the email-threading migration from ADR 0004 Step 1) applied cleanly against
+a real local Postgres instance — 0004 had only failed previously because no
+database was running, not because of any migration defect. While running
+this, found and fixed an actual bug in `config.py`: `Settings` (pydantic-settings)
+defaults to rejecting undeclared env vars, and `.env`'s `SIGNAL_MODE`/`IMAP_MODE`
+(intentionally read via bare `os.environ`, not as `Settings` fields — see
+comments in `config.py`) were tripping that rejection. `database/cli.py` and
+`database/migrations/env.py` both swallow that failure with a bare
+`except Exception` and silently fall back to a hardcoded placeholder DB URL
+(`postgresql://middleware:middleware@...`, a role that doesn't exist
+anywhere), which is why the error surfaced as a confusing
+`role "middleware" does not exist` instead of a config validation error.
+Fixed by adding `extra = "ignore"` to `Settings.Config` in `config.py`. The
+silent-fallback pattern in `cli.py`/`env.py` itself is still there and will
+mask any *future* config-loading failure the same confusing way — worth
+tightening (e.g. log a warning on fallback) next time either file is
+touched, but out of scope for this fix.
+
 ## Five-agent system
 
 Defined in `.claude/agents/`. Roles: `ceo.md` (coordination, project memory
