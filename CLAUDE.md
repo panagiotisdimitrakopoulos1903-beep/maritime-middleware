@@ -246,11 +246,15 @@ reasoning:
   (reasoning: distance is geography-dominated, not class-dominated) — also
   unverified.
 
-**Known failing test, pre-existing and unrelated to today's work:**
-`middleware/tests/test_core.py::TestDateOverlapScore::test_vessel_opens_day_of_laycan`
-has been failing throughout, in `matching/engine.py`'s date-overlap scoring
-logic. Confirmed present before, and untouched by, ADR 0002/0003 and the
-`signal_client.py` fixes. Not yet investigated — needs a `debug` pass.
+**Resolved (2026-07-26):** The previously-listed failing test,
+`middleware/tests/test_core.py::TestDateOverlapScore::test_vessel_opens_day_of_laycan`,
+was investigated by `debug` — the test itself had the incorrect expected
+value; `matching/engine.py`'s date-overlap scoring logic was already correct
+and matched its own documented intent, corroborated by `database/seed.py`'s
+independently duplicated scoring logic. `coder` fixed the test's assertion
+and a stale docstring in `date_overlap_score` (cosmetic, "2-5 days" → "0-7
+days", to match the actual logic). Full suite now passes 100% green (72
+passed, 0 failed). Committed as `cccde1a`.
 
 **Resolved:** ADR 0002's Open questions #3 (whether `_push_to_websockets`'s
 `asyncio.get_event_loop()` call behaves correctly when `_process_inbound`
