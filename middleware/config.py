@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     imap_poll_interval_minutes: int = 2
     imap_poll_batch_size: int = 20
 
+    # Only required when IMAP_MODE=live (mcp/imap_client.py). Optional with
+    # no default so that IMAP_MODE=mock (the default, and what local dev /
+    # seed data relies on per CLAUDE.md) never forces a developer to set
+    # real or dummy IMAP credentials just to start the backend — Settings()
+    # is constructed unconditionally at import time in api/app.py regardless
+    # of IMAP_MODE.
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    imap_user: Optional[str] = None
+    imap_pass: Optional[str] = None
+
     # ── Milter (mail interception) ────────────────────────────────────────────
     milter_socket: str = "inet:9900@localhost"
     milter_name: str = "MaritimeMilter"

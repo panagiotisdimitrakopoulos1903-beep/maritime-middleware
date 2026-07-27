@@ -84,6 +84,7 @@ class MatchResponse(BaseModel):
     received_at: datetime
     sender: Optional[str]
     subject: Optional[str]
+    raw_body: Optional[str]
 
     # Parsed fields
     cargo_type: Optional[str]
@@ -174,6 +175,7 @@ def _process_inbound(
             },
             parse_confidence=parsed.parse_confidence,
             has_low_confidence_fields=parsed.has_low_confidence_fields,
+            low_confidence_field_names=parsed.low_confidence_field_names,
             parse_error=parsed.error,
         )
         session.add(order_row)
@@ -369,6 +371,7 @@ async def get_matches(order_id: str):
             received_at=order.received_at,
             sender=order.sender,
             subject=order.subject,
+            raw_body=order.raw_body,
             cargo_type=order.cargo_type,
             quantity_mt=order.quantity_mt,
             load_port=order.load_port,
@@ -380,8 +383,7 @@ async def get_matches(order_id: str):
             vessel_type=order.vessel_type,
             parse_confidence=order.parse_confidence or 0.0,
             has_low_confidence_fields=order.has_low_confidence_fields or False,
-            low_confidence_fields=list(order.confidence_scores.keys())
-            if order.confidence_scores else [],
+            low_confidence_fields=order.low_confidence_field_names or [],
             matches=[
                 {
                     "rank": m.rank,

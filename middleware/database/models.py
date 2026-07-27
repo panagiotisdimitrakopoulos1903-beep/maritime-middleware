@@ -56,6 +56,12 @@ class InboundOrder(Base):
     # Confidence scores per field (stored as JSON dict)
     confidence_scores = Column(JSON)
 
+    # Field names actually below settings.parser_confidence_threshold at
+    # parse time (parsed.low_confidence_field_names from llm_parser.py) —
+    # NOT the same as confidence_scores.keys(), which is all 6 core fields
+    # unconditionally. FR-21.
+    low_confidence_field_names = Column(JSON, nullable=True)
+
     # Overall parse quality
     parse_confidence = Column(Float)          # mean of all field confidences
     has_low_confidence_fields = Column(Boolean, default=False)

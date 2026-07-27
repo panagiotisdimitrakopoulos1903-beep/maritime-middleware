@@ -19,8 +19,8 @@ from config import settings  # pydantic-settings loader, per PRD 6.2
 
 
 def _connect() -> imaplib.IMAP4_SSL:
-    conn = imaplib.IMAP4_SSL(settings.IMAP_HOST, int(settings.IMAP_PORT))
-    conn.login(settings.IMAP_USER, settings.IMAP_PASS)
+    conn = imaplib.IMAP4_SSL(settings.imap_host, int(settings.imap_port))
+    conn.login(settings.imap_user, settings.imap_pass)
     conn.select("INBOX", readonly=True)  # readonly: never mutate the mailbox
     return conn
 
