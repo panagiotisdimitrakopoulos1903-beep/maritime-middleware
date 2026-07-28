@@ -55,6 +55,9 @@ export const api = {
   /** System health — cache age, vessel count, uptime */
   getStatus: () => get(`/status`),
 
+  /** Latest N outbound (Sent) messages — ADR 0004 Decision #6 */
+  getSentMessages: (limit = 40) => get(`/sent?limit=${limit}`),
+
   /**
    * Send a broker-composed reply. Synchronous on the backend — resolves
    * with {status: "sent", message_id} or rejects with an Error whose

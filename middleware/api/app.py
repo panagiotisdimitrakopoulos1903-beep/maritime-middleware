@@ -5,6 +5,7 @@ Endpoints:
   POST /internal/ingest      — called by Milter with raw email body
   GET  /matches/{order_id}   — get ranked matches for an order
   GET  /orders/latest        — latest N orders with their matches
+  GET  /sent                 — latest N outbound (Sent) messages
   GET  /status               — system health (cache age, vessel count)
   WS   /ws                   — WebSocket push to Electron panel
 """
@@ -638,6 +639,40 @@ async def get_latest_orders(limit: int = 20):
                     "vessel_name": top_match.vessel_name,
                     "total_score": top_match.total_score,
                 } if top_match else None,
+            })
+        return result
+    finally:
+        session.close()
+
+
+@app.get("/sent")
+async def get_sent_messages(limit: int = 20):
+    """
+    Return the most recent outbound messages (ADR 0004, Decision #6 —
+    minimal Inbox/Sent folder concept). Mirrors /orders/latest's shape:
+    plain list of dicts, newest-first, no response_model.
+    """
+    session: Session = get_session(engine)
+    try:
+        messages = (
+            session.query(OutboundMessage)
+            .order_by(OutboundMessage.sent_at.desc())
+            .limit(limit)
+            .all()
+        )
+        result = []
+        for msg in messages:
+            result.append({
+                "id": str(msg.id),
+                "sent_at": msg.sent_at.isoformat(),
+                "from_addr": msg.from_addr,
+                "to_addr": msg.to_addr,
+                "cc_addr": msg.cc_addr,
+                "subject": msg.subject,
+                "send_status": msg.send_status,
+                "error_message": msg.error_message,
+                "thread_id": msg.thread_id,
+                "in_reply_to_order_id": str(msg.in_reply_to_order_id) if msg.in_reply_to_order_id else None,
             })
         return result
     finally:

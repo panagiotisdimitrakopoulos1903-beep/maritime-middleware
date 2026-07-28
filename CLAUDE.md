@@ -244,6 +244,21 @@ broker can retry). Backend error-path contract covered by
 `middleware/tests/test_send_reply_errors.py` (404/503/502, added alongside
 this UI work to pin down what the frontend depends on).
 
+**Inbox/Sent folders (built 2026-07-28, ADR 0004 Decision #6 — minimal
+version only, no custom folders):** `GET /sent` (`api/app.py`) mirrors
+`GET /orders/latest`'s exact shape — plain list of dicts,
+`OutboundMessage.sent_at.desc()`, no `response_model`. `OrderList.jsx` owns
+a local `folder` (`"inbox"`/`"sent"`) `useState` — not lifted to
+`App.jsx`, matching `MatchPanel.jsx`'s `showRaw`/`composeOpen` precedent —
+with two header tabs. Sent rows (`src/components/SentItem.jsx`, new) show
+recipient/subject/relative-time/status (green "Sent" / red "Failed" with
+`error_message` on hover) and are deliberately **not**
+selectable/clickable — there's no detail view for a sent message (no
+matches to show against it), unlike `OrderCard`. Sent has no
+WebSocket/polling (fetched once on-demand when the tab is opened) since
+there's no live-push for outbound messages in this codebase. Inbox
+behavior is completely unchanged.
+
 ### Database (`middleware/database/`)
 
 SQLAlchemy 2.0 models (`models.py`) + Alembic migrations (`migrations/`).
