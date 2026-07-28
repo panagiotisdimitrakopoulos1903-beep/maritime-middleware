@@ -20,12 +20,27 @@ const styles = {
     justifyContent: "space-between",
     marginBottom: 10,
   },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
   title: {
     fontSize: 10,
     fontWeight: 600,
     letterSpacing: "0.08em",
     textTransform: "uppercase",
     color: "var(--text-muted)",
+  },
+  replyBtn: {
+    background: "none",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    color: "var(--text-secondary)",
+    fontSize: 10,
+    fontWeight: 600,
+    padding: "2px 8px",
+    cursor: "pointer",
   },
   confidencePill: (ok) => ({
     fontSize: 10,
@@ -115,7 +130,7 @@ function formatLaycan(start, end) {
   return `${fmt(start)} – ${fmt(end)}`;
 }
 
-export default function ParsedOrderSummary({ order, showRaw, onToggleRaw }) {
+export default function ParsedOrderSummary({ order, showRaw, onToggleRaw, onReply }) {
   if (!order) return null;
 
   const lowFields = new Set(order.low_confidence_fields || []);
@@ -126,9 +141,14 @@ export default function ParsedOrderSummary({ order, showRaw, onToggleRaw }) {
     <div style={styles.wrapper}>
       <div style={styles.header}>
         <span style={styles.title}>Parsed order</span>
-        <span style={styles.confidencePill(isGood)}>
-          {confidence}% confidence
-        </span>
+        <div style={styles.headerActions}>
+          <button style={styles.replyBtn} onClick={onReply}>
+            ↩ Reply
+          </button>
+          <span style={styles.confidencePill(isGood)}>
+            {confidence}% confidence
+          </span>
+        </div>
       </div>
 
       <div style={styles.grid}>

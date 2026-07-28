@@ -221,6 +221,29 @@ auto-reconnect after 3s). Backend URL is hardcoded to
 `http://127.0.0.1:5000` in both `electron/main.js` and `src/lib/api.js` —
 not yet read from a shared config.
 
+**Reply compose (built 2026-07-28, ADR 0004 Decision #4):**
+`src/components/ComposeReply.jsx`, triggered by a "Reply" button in
+`ParsedOrderSummary.jsx`'s header row, rendered by `MatchPanel.jsx` (which
+owns `composeOpen` as local `useState`, the same pattern already used for
+`showRaw` — not lifted to `App.jsx`). Quotes `order.raw_body` with a
+standard `> `-per-line prefix under an `On {date}, {sender} wrote:`
+attribution line, appended to the broker's own typed text on send. Since
+this is a single-mailbox system with no broker-identity config anywhere
+else in the frontend, the form has a small "From" input persisted to
+`localStorage` (`maritime-middleware:reply-from`) — a pragmatic addition
+beyond the ADR's literal field list, not a settings page. Calls the new
+`api.sendReply()` (`src/lib/api.js`), which — unlike the existing `get()`
+helper — reads the JSON response body's `detail` field on failure so the
+broker sees the backend's actual error (`"SMTP is not configured..."`,
+`"SMTP send failed: ..."`, `"Order not found"`), not just a bare status
+code; this matters because `/internal/send` is synchronous by design (ADR
+0004, Decision #5) and a generic error would defeat the point. State
+machine: idle → sending (form locked) → sent (persistent green
+confirmation) or error (persistent red message, form stays populated,
+broker can retry). Backend error-path contract covered by
+`middleware/tests/test_send_reply_errors.py` (404/503/502, added alongside
+this UI work to pin down what the frontend depends on).
+
 ### Database (`middleware/database/`)
 
 SQLAlchemy 2.0 models (`models.py`) + Alembic migrations (`migrations/`).
@@ -268,6 +291,7 @@ Route resolution to `architect` unless noted otherwise.
 | IMAP UID stability as the `source_message_id` dedup key on a real (non-mock) mailbox — `middleware/mcp/imap_client.py` supplies the UID as the id, `scheduler/jobs.py::_poll_imap_inbox` dedupes against it via `InboundOrder.source_message_id`; a `UIDVALIDITY` reset on the broker's mail server could reassign UIDs and defeat dedup | ADR 0002, Open questions #1 | Not a blocker for `IMAP_MODE=mock` (fixed ids) or initial live rollout; resolved once `debug` tests against the real WT3 mailbox before go-live and confirms UID reuse doesn't occur across a `UIDVALIDITY` reset — or `imap_client.py` is changed to hash the `Message-ID` header as a more robust key instead |
 | Whether `middleware/api/app.py::_broadcast_new_matches` should batch multiple pending payloads if several orders complete in a very tight window, rather than scheduling one coroutine per order | ADR 0003, Open questions #1 | Not addressed in ADR 0003 — current ingestion rate (one broker mailbox, `imap_poll_interval_minutes=2`) makes this a non-issue in practice; revisit only if push volume grows |
 | Whether the Electron panel needs a missed-broadcast recovery path (e.g. catch up via `/orders/latest` on reconnect) | ADR 0003, Open questions #2 | Low priority — not in scope of the ADR 0003 fix, which restores real-time delivery only |
+| `GET /status` throws a 500 (`TypeError: can't subtract offset-naive and offset-aware datetimes`) whenever a `SignalCacheRefresh` row exists — `database/models.py`'s `refreshed_at` column has no `timezone=True`, so Postgres/SQLAlchemy hands back a naive `datetime`, but `get_status()` (`api/app.py`) subtracts it from `datetime.now(timezone.utc)` | Found 2026-07-28 while testing the reply-compose UI (unrelated pre-existing bug, confirmed to predate that work via `git log -L`) | Not yet fixed — flagged here so it isn't lost. Fix is either add `timezone=True` to the column (+ a migration) or normalize on read in `signal_client/client.py::get_last_refresh()` |
 
 **Blocking `SIGNAL_MODE=live` production trust** — no real Signal Ocean API
 key has been available to verify any of these three judgment calls made

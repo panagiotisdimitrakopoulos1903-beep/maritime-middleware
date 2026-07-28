@@ -11,6 +11,7 @@
 import { useState } from "react";
 import ParsedOrderSummary from "./ParsedOrderSummary";
 import DealCard from "./DealCard";
+import ComposeReply from "./ComposeReply";
 
 const styles = {
   panel: {
@@ -131,6 +132,7 @@ function formatCacheAge(isoString) {
 
 export default function MatchPanel({ order, loading }) {
   const [showRaw, setShowRaw] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
 
   if (!order && !loading) {
     return (
@@ -181,7 +183,16 @@ export default function MatchPanel({ order, loading }) {
               order={order}
               showRaw={showRaw}
               onToggleRaw={() => setShowRaw(v => !v)}
+              onReply={() => setComposeOpen(true)}
             />
+
+            {composeOpen && (
+              <ComposeReply
+                key={order.order_id}
+                order={order}
+                onClose={() => setComposeOpen(false)}
+              />
+            )}
 
             <div style={styles.matchesHeader}>
               <span style={styles.matchesLabel}>

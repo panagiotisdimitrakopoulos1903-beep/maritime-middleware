@@ -14,6 +14,35 @@ async function get(path) {
   return res.json();
 }
 
+/**
+ * POST helper that surfaces the backend's real error detail on failure.
+ * FastAPI's HTTPException responses are `{"detail": "..."}` JSON bodies
+ * with the actual failure reason (e.g. "SMTP is not configured — set
+ * SMTP_HOST, SMTP_USER, SMTP_PASS in .env") — unlike `get()`, this reads
+ * the body so callers (the compose UI) can show the broker the real
+ * reason a send failed, not just a bare status code.
+ */
+async function post(path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = await res.json();
+      if (data && data.detail) detail = data.detail;
+    } catch {
+      // Body wasn't JSON (or was empty) — fall back to statusText.
+    }
+    throw new Error(detail || `${res.status} ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
 // ── API methods ───────────────────────────────────────────────────────────────
 
 export const api = {
@@ -25,6 +54,14 @@ export const api = {
 
   /** System health — cache age, vessel count, uptime */
   getStatus: () => get(`/status`),
+
+  /**
+   * Send a broker-composed reply. Synchronous on the backend — resolves
+   * with {status: "sent", message_id} or rejects with an Error whose
+   * message is the backend's real failure detail (SMTP not configured,
+   * SMTP send failed, order not found, etc).
+   */
+  sendReply: (payload) => post(`/internal/send`, payload),
 };
 
 // ── WebSocket — live push from Python backend ─────────────────────────────────
