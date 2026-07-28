@@ -8,7 +8,7 @@
 const { app, BrowserWindow, screen, ipcMain, shell } = require("electron");
 const path = require("path");
 
-const BACKEND_URL = "http://127.0.0.1:5000";
+const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:5000";
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
 let mainWindow = null;

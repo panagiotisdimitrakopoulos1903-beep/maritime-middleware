@@ -217,9 +217,23 @@ external link, minimize, drag — since the frameless window has no native
 title bar to drag from). React root (`src/App.jsx`) owns WebSocket
 connection + selected-order state; `src/lib/api.js` is the only place that
 talks to the backend (REST via `fetch`, push via `WebSocket` with
-auto-reconnect after 3s). Backend URL is hardcoded to
-`http://127.0.0.1:5000` in both `electron/main.js` and `src/lib/api.js` —
-not yet read from a shared config.
+auto-reconnect after 3s). **Backend URL configuration (fixed 2026-07-28):**
+`electron/main.js`'s `BACKEND_URL` (`process.env.BACKEND_URL`, defaults to
+`http://127.0.0.1:5000`) is the single source of truth — everything else
+derives from it via the IPC bridge that already existed for exactly this
+(`ipcMain.handle("get-backend-url", ...)` / `preload.js`'s
+`window.electronAPI.getBackendUrl()`, previously wired but unused).
+`src/lib/api.js` resolves its base URL from that IPC call (cached as a
+promise so concurrent early calls — e.g. `App.jsx`'s initial
+`getLatestOrders()` and `connectWebSocket()` firing in the same mount
+effect — share one round trip, not duplicate `invoke`s), falling back to
+`process.env.REACT_APP_BACKEND_URL` only when there's no Electron preload
+context at all (plain-browser dev via `npm run react`). See
+`middleware_frontend/.env.example` (new) for both vars. A plain shared JS
+file was considered and rejected: CRA's `ModuleScopePlugin` restricts
+webpack-built code to importing from `src/`, and `electron/main.js` (plain
+Node/CommonJS) can't cleanly `require()` an ES module from `src/` without
+extra build tooling — the existing IPC bridge sidesteps both problems.
 
 **Reply compose (built 2026-07-28, ADR 0004 Decision #4):**
 `src/components/ComposeReply.jsx`, triggered by a "Reply" button in

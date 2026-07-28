@@ -4,12 +4,34 @@
  * All network calls go through here. Components never fetch directly.
  */
 
-const BASE = "http://127.0.0.1:5000";
+// Fallback used only when there's no Electron preload context at all (e.g.
+// `npm run react` opened directly in a plain browser at localhost:3000 for
+// frontend-only dev). CRA only inlines `process.env.*` vars prefixed
+// `REACT_APP_` into the built bundle, so this must keep that prefix.
+const FALLBACK_BASE = process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:5000";
+
+// The real source of truth is main.js's BACKEND_URL, read via the IPC bridge
+// (window.electronAPI.getBackendUrl(), wired in electron/preload.js). That
+// call is async, but get()/post()/patch() are called all over the app as if
+// building a URL were synchronous — so resolve it once and cache the promise
+// itself (not just its resolved value), so concurrent early calls all await
+// the same in-flight IPC round-trip instead of firing duplicate invokes.
+let basePromise = null;
+
+async function getBase() {
+  if (!basePromise) {
+    basePromise = window.electronAPI
+      ? window.electronAPI.getBackendUrl()
+      : Promise.resolve(FALLBACK_BASE);
+  }
+  return basePromise;
+}
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 async function get(path) {
-  const res = await fetch(`${BASE}${path}`);
+  const base = await getBase();
+  const res = await fetch(`${base}${path}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -23,7 +45,8 @@ async function get(path) {
  * reason a send failed, not just a bare status code.
  */
 async function post(path, body) {
-  const res = await fetch(`${BASE}${path}`, {
+  const base = await getBase();
+  const res = await fetch(`${base}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -51,7 +74,8 @@ async function post(path, body) {
  */
 async function patch(path) {
   try {
-    const res = await fetch(`${BASE}${path}`, { method: "PATCH" });
+    const base = await getBase();
+    const res = await fetch(`${base}${path}`, { method: "PATCH" });
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -101,10 +125,12 @@ export function subscribeToMatches(callback) {
   return () => listeners.delete(callback);
 }
 
-export function connectWebSocket() {
+export async function connectWebSocket() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
 
-  ws = new WebSocket(`ws://127.0.0.1:5000/ws`);
+  const base = await getBase();
+  const wsUrl = base.replace(/^http/, "ws") + "/ws";
+  ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     console.log("[ws] connected");
