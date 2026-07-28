@@ -65,6 +65,20 @@ class Settings(BaseSettings):
     smtp_pass: Optional[str] = None
     smtp_use_tls: bool = True
 
+    # ── Broker identity ──────────────────────────────────────────────────────
+    # Display identity for the human operating this mailbox — distinct from
+    # imap_user/smtp_user (the mailbox's own login credentials) because the
+    # display name/reply-to a counterparty sees may differ from the account
+    # credentials (e.g. a shared desk mailbox login used by multiple
+    # individual brokers). Used only to prefill the Electron panel's
+    # reply-compose "From" field (GET /config). Optional with no default for
+    # the same reason as imap_host/port/user/pass above: Settings() is
+    # constructed unconditionally at import time, and local dev must not
+    # require these to be set — an unset broker_email just leaves the
+    # compose form's From field blank and manually-editable, same as today.
+    broker_name: Optional[str] = None
+    broker_email: Optional[str] = None
+
     # ── Milter (mail interception) ────────────────────────────────────────────
     milter_socket: str = "inet:9900@localhost"
     milter_name: str = "MaritimeMilter"

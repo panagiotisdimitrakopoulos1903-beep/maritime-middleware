@@ -241,12 +241,11 @@ extra build tooling — the existing IPC bridge sidesteps both problems.
 owns `composeOpen` as local `useState`, the same pattern already used for
 `showRaw` — not lifted to `App.jsx`). Quotes `order.raw_body` with a
 standard `> `-per-line prefix under an `On {date}, {sender} wrote:`
-attribution line, appended to the broker's own typed text on send. Since
-this is a single-mailbox system with no broker-identity config anywhere
-else in the frontend, the form has a small "From" input persisted to
-`localStorage` (`maritime-middleware:reply-from`) — a pragmatic addition
-beyond the ADR's literal field list, not a settings page. Calls the new
-`api.sendReply()` (`src/lib/api.js`), which — unlike the existing `get()`
+attribution line, appended to the broker's own typed text on send. The
+form's editable "From" input is seeded from `GET /config` (fixed
+2026-07-29 — was originally a `localStorage`-only value with no backend
+source of truth; see below), not a settings page — still a single global
+broker identity, no multi-broker concept. Calls the new `api.sendReply()` (`src/lib/api.js`), which — unlike the existing `get()`
 helper — reads the JSON response body's `detail` field on failure so the
 broker sees the backend's actual error (`"SMTP is not configured..."`,
 `"SMTP send failed: ..."`, `"Order not found"`), not just a bare status
@@ -257,6 +256,20 @@ confirmation) or error (persistent red message, form stays populated,
 broker can retry). Backend error-path contract covered by
 `middleware/tests/test_send_reply_errors.py` (404/503/502, added alongside
 this UI work to pin down what the frontend depends on).
+
+**Broker identity config (fixed 2026-07-29):** `config.py` gained
+`broker_name`/`broker_email` (`Optional`, no default — same reasoning as
+`imap_user`/`smtp_user`: `Settings()` is constructed unconditionally at
+import time, so local dev must not require these to be set), documented in
+`.env.example` alongside the IMAP/SMTP sections. Distinct from
+`imap_user`/`smtp_user` — those are login credentials, this is the display
+identity a counterparty sees, which can differ (e.g. a shared desk mailbox
+login used by multiple individual brokers). New `GET /config` (pure
+`Settings` read, no DB access) exposes it; `ComposeReply.jsx` fetches it
+once on mount and seeds the From field as `"{name} <{email}>"` (or just the
+email, or blank if unconfigured/the fetch fails — not a new failure mode).
+Replaces the previous `localStorage`-only stopgap, which had no backend
+source of truth at all. Field stays manually editable.
 
 **Inbox/Sent folders (built 2026-07-28, ADR 0004 Decision #6 — minimal
 version only, no custom folders):** `GET /sent` (`api/app.py`) mirrors

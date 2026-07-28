@@ -6,16 +6,28 @@
  * — the broker gets a definitive sent/failed result, never a silent
  * fire-and-forget. See ADR 0004, Decision #4/#5.
  *
- * There is no broker-identity/account config anywhere in this frontend
- * (single-mailbox system) and the backend requires a `sender`, so this
- * component adds a small editable "From" field, persisted to localStorage
- * so the broker doesn't retype it on every reply. This is a pragmatic
- * addition beyond ADR 0004's literal field list, not a settings page.
+ * The backend requires a `sender`, so this component has an editable
+ * "From" field. Its default value comes from GET /config (BROKER_NAME/
+ * BROKER_EMAIL in the backend's .env) — fetched once on mount and used to
+ * seed the field as "{name} <{email}>" (or just the email if no name is
+ * configured). If neither is configured (a valid state in local dev, see
+ * .env.example), or the fetch fails for any reason, the field just starts
+ * empty and stays manually editable — same as an unconfigured broker
+ * identity, not a new failure mode. This is a single, global identity (one
+ * broker mailbox) — not a settings page, and not a per-broker/multi-user
+ * concept.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 
-const FROM_STORAGE_KEY = "maritime-middleware:reply-from";
+/** "Name <email>" if both set, just email if only email set, else "". */
+function formatBrokerIdentity(config) {
+  const name = config?.broker_name?.trim();
+  const email = config?.broker_email?.trim();
+  if (name && email) return `${name} <${email}>`;
+  if (email) return email;
+  return "";
+}
 
 const styles = {
   wrapper: {
@@ -161,14 +173,36 @@ function quoteLines(rawBody) {
 }
 
 export default function ComposeReply({ order, onClose }) {
-  const [from, setFrom] = useState(
-    () => localStorage.getItem(FROM_STORAGE_KEY) || ""
-  );
+  const [from, setFrom] = useState("");
   const [to, setTo] = useState(order?.sender || "");
   const [subject, setSubject] = useState(dedupeReplySubject(order?.subject));
   const [body, setBody] = useState("");
   const [status, setStatus] = useState("idle"); // idle | sending | sent | error
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Fetch the broker's configured display identity once on mount to seed
+  // the "From" field. Only fills it in if the broker hasn't already typed
+  // something into it by the time this resolves (the functional setFrom
+  // update checks the live value, not a stale closure); if the fetch fails
+  // (backend unreachable, etc.) just leave the field empty — same
+  // graceful-empty behavior as an unconfigured identity, not a new failure
+  // mode. This component remounts per order (see MatchPanel's
+  // `key={order.order_id}`), so this runs fresh each time compose opens.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setFrom((current) => (current ? current : formatBrokerIdentity(config)));
+      })
+      .catch(() => {
+        // No backend-configured identity available — leave From empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!order) return null;
 
@@ -182,9 +216,7 @@ export default function ComposeReply({ order, onClose }) {
   const canSend = !locked && from.trim() && to.trim() && subject.trim();
 
   function handleFromChange(e) {
-    const value = e.target.value;
-    setFrom(value);
-    localStorage.setItem(FROM_STORAGE_KEY, value);
+    setFrom(e.target.value);
   }
 
   async function handleSend() {

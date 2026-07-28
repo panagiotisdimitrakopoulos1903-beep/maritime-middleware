@@ -8,6 +8,7 @@ Endpoints:
   PATCH /orders/{order_id}/read — mark an order as read (local-only, ADR 0004 Decision #7)
   GET  /sent                 — latest N outbound (Sent) messages
   GET  /status               — system health (cache age, vessel count)
+  GET  /config                — broker display identity (prefills reply-compose "From")
   WS   /ws                   — WebSocket push to Electron panel
 """
 import asyncio
@@ -734,6 +735,23 @@ async def get_status():
         )
     finally:
         session.close()
+
+
+@app.get("/config")
+async def get_config():
+    """
+    Broker display identity, read straight from Settings (no DB access).
+
+    Prefills the Electron panel's reply-compose "From" field — see
+    ComposeReply.jsx. Distinct from /status (system/cache health): this is
+    static config, not a health signal. Either field may be `null` if unset
+    in .env (the default for local dev); the frontend treats that as "leave
+    From blank and manually editable", not an error.
+    """
+    return {
+        "broker_name": settings.broker_name,
+        "broker_email": settings.broker_email,
+    }
 
 
 @app.websocket("/ws")

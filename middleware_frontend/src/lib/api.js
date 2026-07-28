@@ -95,6 +95,13 @@ export const api = {
   /** System health — cache age, vessel count, uptime */
   getStatus: () => get(`/status`),
 
+  /**
+   * Broker display identity (BROKER_NAME/BROKER_EMAIL from the backend's
+   * .env) — used to prefill ComposeReply's "From" field. Either value may
+   * be null if unconfigured.
+   */
+  getConfig: () => get(`/config`),
+
   /** Latest N outbound (Sent) messages — ADR 0004 Decision #6 */
   getSentMessages: (limit = 40) => get(`/sent?limit=${limit}`),
 
