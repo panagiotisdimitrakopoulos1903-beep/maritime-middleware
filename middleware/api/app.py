@@ -143,10 +143,16 @@ def _compute_thread_id(
     """
     Determine this message's thread_id (ADR 0004, Decision #3).
 
-    Minimum viable version: match `in_reply_to` against existing
-    `InboundOrder.message_id` values only. Deliberately does NOT chain-walk
-    the `references` header (which may list the entire reply chain, RFC
-    2822 §3.6.4) — for a first reply, `in_reply_to` and the last id in
+    Matches `in_reply_to` against existing `InboundOrder.message_id` values
+    first; if nothing matches there, also checks `OutboundMessage.message_id`
+    — a broker reply sent via POST /internal/send is persisted as an
+    OutboundMessage row (not an InboundOrder row), so a counterparty's reply
+    to *that* sent message has an `in_reply_to` that only matches the
+    OutboundMessage table, not InboundOrder. Without this second check, such
+    replies would incorrectly start a brand new thread instead of rejoining
+    the one the broker replied into. Deliberately does NOT chain-walk the
+    `references` header (which may list the entire reply chain, RFC 2822
+    §3.6.4) — for a first reply, `in_reply_to` and the last id in
     `references` are the same value, so the only case this simplification
     misses is a message whose `in_reply_to` is missing/stale but whose
     `references` chain would still resolve to an existing thread (e.g. a
@@ -154,12 +160,12 @@ def _compute_thread_id(
     out of scope for this slice; see ADR 0004 open question #3, which
     separately flags backfill/out-of-order delivery as unaddressed here.
 
-    If `in_reply_to` matches an existing row's `message_id`, this message
-    joins that row's thread. Otherwise it starts a new thread, identified by
-    its own `message_id` — or, if `message_id` itself is absent (a message
-    with no Message-ID header at all, which real mail clients essentially
-    never produce but mock/manual ingest paths could), a freshly generated
-    UUID so every row still has a non-null thread_id.
+    If `in_reply_to` matches an existing InboundOrder or OutboundMessage
+    row, this message joins that row's thread. Otherwise it starts a new
+    thread, identified by its own `message_id` — or, if `message_id` itself
+    is absent (a message with no Message-ID header at all, which real mail
+    clients essentially never produce but mock/manual ingest paths could),
+    a freshly generated UUID so every row still has a non-null thread_id.
     """
     if in_reply_to:
         parent = (
@@ -169,6 +175,14 @@ def _compute_thread_id(
         )
         if parent and parent[0]:
             return parent[0]
+
+        sent_parent = (
+            session.query(OutboundMessage.thread_id)
+            .filter(OutboundMessage.message_id == in_reply_to)
+            .first()
+        )
+        if sent_parent and sent_parent[0]:
+            return sent_parent[0]
     return message_id or str(uuid.uuid4())
 
 

@@ -22,6 +22,7 @@ Covers:
 
 Run with: pytest tests/ -v
 """
+import asyncio
 import uuid
 from unittest.mock import patch
 
@@ -30,8 +31,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 import api.app as app
-from database.models import Base, InboundOrder, get_session
+from database.models import Base, InboundOrder, OutboundMessage, get_session
 from parser.llm_parser import ParsedOrder
+from api.app import SendRequest
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -124,6 +126,32 @@ class TestComputeThreadId:
         # in_reply_to).
         assert thread_id == "<child@x.com>"
 
+    def test_in_reply_to_matching_outbound_message_joins_that_thread(self, wired_app_engine):
+        """A counterparty replying to a message *we* sent (POST
+        /internal/send) has an in_reply_to that matches an
+        OutboundMessage.message_id, not any InboundOrder.message_id — the
+        gap this fix addresses."""
+        session = get_session(wired_app_engine)
+        try:
+            session.add(OutboundMessage(
+                in_reply_to_order_id=None,
+                thread_id="<orig@example.com>",
+                from_addr="broker@example.com",
+                to_addr="counterparty@example.com",
+                subject="RE: cargo",
+                body="offer",
+                message_id="<broker-reply@example.com>",
+                sent_at=app.datetime.now(app.timezone.utc),
+                send_status="sent",
+            ))
+            session.commit()
+            thread_id = app._compute_thread_id(
+                session, "<second-reply@example.com>", "<broker-reply@example.com>"
+            )
+        finally:
+            session.close()
+        assert thread_id == "<orig@example.com>"
+
 
 # ── End-to-end through _process_inbound ─────────────────────────────────────
 
@@ -201,5 +229,87 @@ class TestProcessInboundThreading:
             row = _get_order(session, order_id)
             assert row.message_id is None
             assert row.thread_id is not None
+        finally:
+            session.close()
+
+
+# ── End-to-end: reply-to-our-sent-reply threading (the gap this fix closes) ──
+
+class TestReplyToOutboundMessageThreading:
+    """
+    Covers the gap flagged in ADR 0004's follow-up: a broker sends a reply
+    via POST /internal/send (persisted as an OutboundMessage row, not an
+    InboundOrder row); if the counterparty then replies to *that* message,
+    the new inbound message's in_reply_to matches OutboundMessage.message_id
+    rather than any InboundOrder.message_id. Before the fix, that reply fell
+    through to `_compute_thread_id`'s final line and incorrectly started a
+    brand new thread instead of joining the existing one.
+    """
+
+    def test_reply_to_broker_sent_reply_joins_original_thread(self, wired_app_engine):
+        # ── Step 1: initial inbound order — the thread root ─────────────────
+        order_id = uuid.uuid4()
+        app._process_inbound(
+            "counterparty@example.com", "ENQ - cargo", "55k grain ant/jpn",
+            order_id,
+            message_id="<orig@example.com>",
+        )
+        session = get_session(wired_app_engine)
+        try:
+            root_row = _get_order(session, order_id)
+            assert root_row.thread_id == "<orig@example.com>"
+        finally:
+            session.close()
+
+        # ── Step 2: broker sends a reply via POST /internal/send ───────────
+        req = SendRequest(
+            sender="broker@example.com",
+            to="counterparty@example.com",
+            subject="RE: ENQ - cargo",
+            body="we can offer an aframax",
+            in_reply_to_order_id=str(order_id),
+        )
+        # A real HTTP caller always sends in_reply_to_order_id as a JSON
+        # string (as constructed above), and send_reply's query against it
+        # works fine on real Postgres (psycopg2 casts the string
+        # implicitly). The in-memory sqlite fixture's UUID column type is
+        # emulated rather than native, though, and its bind processor
+        # requires an actual uuid.UUID instance — same class of sqlite-only
+        # divergence wired_app_engine already documents above. Reassigning
+        # post-construction (pydantic doesn't re-validate on plain
+        # attribute assignment) works around the fixture without changing
+        # what's actually sent to send_reply's business logic.
+        req.in_reply_to_order_id = order_id
+        with patch.object(app, "send_email", return_value="<broker-reply@example.com>") as mock_send:
+            result = asyncio.run(app.send_reply(req))
+        mock_send.assert_called_once()
+        assert result["message_id"] == "<broker-reply@example.com>"
+
+        session = get_session(wired_app_engine)
+        try:
+            outbound = (
+                session.query(OutboundMessage)
+                .filter_by(message_id="<broker-reply@example.com>")
+                .first()
+            )
+            assert outbound is not None
+            assert outbound.thread_id == "<orig@example.com>"
+        finally:
+            session.close()
+
+        # ── Step 3: counterparty replies to the broker's sent reply ─────────
+        reply_id = uuid.uuid4()
+        app._process_inbound(
+            "counterparty@example.com", "RE: RE: ENQ - cargo", "aframax works for us",
+            reply_id,
+            message_id="<counterparty-reply2@example.com>",
+            in_reply_to="<broker-reply@example.com>",
+        )
+
+        # ── Step 4: it must land in the same thread as the original ────────
+        session = get_session(wired_app_engine)
+        try:
+            reply_row = _get_order(session, reply_id)
+            assert reply_row.thread_id == "<orig@example.com>"
         finally:
             session.close()

@@ -168,8 +168,7 @@ Signal Ocean's response time.
 ### Outbound SMTP send (`middleware/mail/smtp_client.py`)
 
 Built 2026-07-28 per ADR 0004, Decisions #5/#6 — backend only (frontend
-compose UI, `GET /sent`, read/unread, and extending `_compute_thread_id` to
-also match `OutboundMessage.message_id` are explicitly not built yet; see
+compose UI, `GET /sent`, and read/unread are explicitly not built yet; see
 that ADR's Consequences list for the full remaining scope). Not an MCP
 server — a direct stdlib `smtplib` + `email.message.EmailMessage` wrapper,
 symmetric with `mcp/imap_client.py`'s read side the same way
@@ -197,6 +196,15 @@ also carries a denormalized `thread_id` copied from the parent order,
 matching the same denormalization convention `MatchResult` already
 established. Applied and verified against the local Postgres instance;
 full suite 80/80 green after this change.
+
+**Resolved (2026-07-28):** `_compute_thread_id` (`api/app.py`) now also
+matches `in_reply_to` against `OutboundMessage.message_id` (falling back to
+its denormalized `thread_id`), not just `InboundOrder.message_id` — closing
+the gap flagged above where a counterparty's reply to a broker-sent message
+would otherwise incorrectly start a new thread instead of rejoining the
+existing one. Covered by
+`tests/test_email_threading.py::TestReplyToOutboundMessageThreading`. Full
+suite 82/82 green after this change.
 
 ### Frontend (`middleware_frontend/`)
 
