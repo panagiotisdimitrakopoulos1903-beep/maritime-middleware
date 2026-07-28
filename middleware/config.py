@@ -49,6 +49,22 @@ class Settings(BaseSettings):
     imap_user: Optional[str] = None
     imap_pass: Optional[str] = None
 
+    # ── SMTP outbound send ───────────────────────────────────────────────────
+    # ADR 0004, Decision #5. Deliberately separate fields from imap_* above
+    # (not reused/aliased) even though in practice they'll usually hold the
+    # same broker mailbox credentials — different hostnames on the same
+    # provider are common (e.g. imap.brokerfirm.com vs smtp.brokerfirm.com),
+    # and collapsing them would mean an IMAP credential rotation silently
+    # changes SMTP behavior too. Optional with no default for the same reason
+    # as imap_host/port/user/pass: Settings() is constructed unconditionally
+    # at import time, and local dev / tests must not require real (or dummy)
+    # SMTP credentials just to start the backend.
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_pass: Optional[str] = None
+    smtp_use_tls: bool = True
+
     # ── Milter (mail interception) ────────────────────────────────────────────
     milter_socket: str = "inet:9900@localhost"
     milter_name: str = "MaritimeMilter"

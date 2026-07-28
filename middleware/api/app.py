@@ -10,6 +10,8 @@ Endpoints:
 """
 import asyncio
 import concurrent.futures
+import smtplib
+import socket
 import uuid
 import structlog
 from contextlib import asynccontextmanager
@@ -24,10 +26,11 @@ from sqlalchemy.orm import Session
 from config import settings
 from database.models import (
     get_engine, get_session, create_tables,
-    InboundOrder, MatchResult, CachedVessel
+    InboundOrder, MatchResult, CachedVessel, OutboundMessage
 )
 from parser.llm_parser import parse_message
 from signal_client.client import SignalCacheClient
+from mail.smtp_client import send_email, SMTPNotConfiguredError
 from matching.engine import MatchingEngine, ScoredVessel
 from scheduler.jobs import start_scheduler, stop_scheduler
 
@@ -110,6 +113,15 @@ class MatchResponse(BaseModel):
 
     # Cache info
     signal_last_refreshed: Optional[datetime]
+
+
+class SendRequest(BaseModel):
+    sender: str
+    to: str
+    cc: Optional[str] = None
+    subject: str
+    body: str
+    in_reply_to_order_id: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
@@ -398,6 +410,115 @@ async def ingest(req: IngestRequest, background_tasks: BackgroundTasks):
     )
     log.info("ingest.accepted", order_id=str(order_id))
     return {"order_id": str(order_id), "status": "accepted"}
+
+
+@app.post("/internal/send")
+async def send_reply(req: SendRequest):
+    """
+    Send an outbound reply via the broker's real SMTP mailbox (ADR 0004,
+    Decisions #5/#6).
+
+    Unlike /internal/ingest, this is deliberately SYNCHRONOUS — no
+    BackgroundTasks, no 202. The broker is watching a Send button and needs
+    a definite, immediate result: 200 with the generated Message-ID on
+    success, or a clear 4xx/5xx with `detail` describing what went wrong.
+    An OutboundMessage row is written on both success and failure so the
+    Sent view (and the broker) can see failed attempts too, not just
+    successful ones.
+    """
+    session: Session = get_session(engine)
+    try:
+        # ── Derive threading headers from the parent order, if replying ────
+        thread_id = None
+        out_in_reply_to = None
+        out_references = None
+
+        if req.in_reply_to_order_id:
+            parent = session.query(InboundOrder).filter_by(
+                id=req.in_reply_to_order_id
+            ).first()
+            if not parent:
+                raise HTTPException(status_code=404, detail="Order not found")
+
+            thread_id = parent.thread_id
+
+            # Only set In-Reply-To/References if the parent actually has a
+            # Message-ID to thread against (ADR 0004, Decision #3 — not
+            # every inbound row carries one, e.g. manual/legacy ingests).
+            if parent.message_id:
+                out_in_reply_to = parent.message_id
+                out_references = (
+                    f"{parent.references} {parent.message_id}"
+                    if parent.references
+                    else parent.message_id
+                )
+
+        # ── Send ─────────────────────────────────────────────────────────────
+        send_status = "failed"
+        error_message = None
+        message_id = None
+        http_error: Optional[HTTPException] = None
+
+        try:
+            message_id = send_email(
+                sender=req.sender,
+                to=req.to,
+                subject=req.subject,
+                body=req.body,
+                cc=req.cc,
+                in_reply_to=out_in_reply_to,
+                references=out_references,
+            )
+            send_status = "sent"
+        except SMTPNotConfiguredError as e:
+            error_message = str(e)
+            http_error = HTTPException(status_code=503, detail=error_message)
+        except (
+            smtplib.SMTPException,
+            socket.gaierror,
+            TimeoutError,
+            ConnectionRefusedError,
+            OSError,
+        ) as e:
+            error_message = str(e)
+            http_error = HTTPException(status_code=502, detail=f"SMTP send failed: {error_message}")
+
+        # ── Persist an OutboundMessage row — on success AND failure ─────────
+        session.add(OutboundMessage(
+            in_reply_to_order_id=req.in_reply_to_order_id,
+            thread_id=thread_id,
+            from_addr=req.sender,
+            to_addr=req.to,
+            cc_addr=req.cc,
+            subject=req.subject,
+            body=req.body,
+            message_id=message_id,
+            in_reply_to=out_in_reply_to,
+            references=out_references,
+            sent_at=datetime.now(timezone.utc),
+            send_status=send_status,
+            error_message=error_message,
+        ))
+        session.commit()
+
+        if http_error is not None:
+            log.error(
+                "send.failed",
+                to=req.to,
+                in_reply_to_order_id=req.in_reply_to_order_id,
+                error=error_message,
+            )
+            raise http_error
+
+        log.info(
+            "send.success",
+            to=req.to,
+            message_id=message_id,
+            in_reply_to_order_id=req.in_reply_to_order_id,
+        )
+        return {"status": "sent", "message_id": message_id}
+    finally:
+        session.close()
 
 
 @app.get("/matches/{order_id}", response_model=MatchResponse)

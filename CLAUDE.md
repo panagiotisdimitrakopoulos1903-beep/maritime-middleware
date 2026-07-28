@@ -165,6 +165,39 @@ rows that no longer appear in Signal's response (assumed fixed/gone).
 cache and never touches the live API, so matching latency is independent of
 Signal Ocean's response time.
 
+### Outbound SMTP send (`middleware/mail/smtp_client.py`)
+
+Built 2026-07-28 per ADR 0004, Decisions #5/#6 — backend only (frontend
+compose UI, `GET /sent`, read/unread, and extending `_compute_thread_id` to
+also match `OutboundMessage.message_id` are explicitly not built yet; see
+that ADR's Consequences list for the full remaining scope). Not an MCP
+server — a direct stdlib `smtplib` + `email.message.EmailMessage` wrapper,
+symmetric with `mcp/imap_client.py`'s read side the same way
+`signal_client/client.py` is symmetric with `mcp/signal_server.py`.
+`config.py` gained `smtp_host`/`smtp_port` (587)/`smtp_user`/`smtp_pass`/
+`smtp_use_tls` (all `Optional`/defaulted, same reasoning as `imap_host` et
+al — `Settings()` is constructed unconditionally at import time) —
+deliberately separate fields from `imap_*`, not aliased, even though they'll
+usually hold the same broker credentials.
+
+`POST /internal/send` (`api/app.py`) is **synchronous** — no
+`BackgroundTasks`, no `202` — a deliberate divergence from
+`/internal/ingest`'s fire-and-forget shape, because the broker is watching
+a Send button and needs a definite result. Returns `200` +
+`{status: "sent", message_id}` on success; `503` if SMTP isn't configured;
+`502` with the underlying error on any `smtplib`/socket failure; `404` if
+`in_reply_to_order_id` doesn't resolve to a real `InboundOrder`. When
+replying, `In-Reply-To`/`References` are derived from the parent order's
+`message_id`/`references` (RFC 2822 reply semantics), skipped if the parent
+has no `message_id` to thread against. A new `outbound_messages` table
+(`OutboundMessage` model, migration `0005_outbound_messages`) is written on
+**both** success and failure — the `send_status`/`error_message` columns
+exist specifically so failed attempts are recorded, not just successes; it
+also carries a denormalized `thread_id` copied from the parent order,
+matching the same denormalization convention `MatchResult` already
+established. Applied and verified against the local Postgres instance;
+full suite 80/80 green after this change.
+
 ### Frontend (`middleware_frontend/`)
 
 Electron + React, **not a WT3 clone** — a frameless, always-on-top, 420px

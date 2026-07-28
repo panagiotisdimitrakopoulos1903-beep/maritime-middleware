@@ -94,6 +94,63 @@ class InboundOrder(Base):
     )
 
 
+# ── Outbound messages (Sent) ──────────────────────────────────────────────────
+
+class OutboundMessage(Base):
+    """
+    Every reply sent via POST /internal/send (ADR 0004, Decisions #5/#6).
+
+    Populated by that endpoint's own send code path only — on BOTH success
+    and failure, per Decision #6 ("populated only by the backend's own
+    successful send calls" means "only this code path writes rows", not
+    "only successful sends get a row"; send_status/error_message only make
+    sense as columns if failed attempts are recorded too, so the broker's
+    Sent view can show a failed send rather than silently losing it).
+
+    Deliberately a separate table from inbound_orders (not a unified
+    `messages` table with a direction column) — see CLAUDE.md's
+    "Conventions worth knowing" and ADR 0004 Decision #6's Reasoning:
+    inbound messages carry parse/match columns that are structurally
+    meaningless for outbound rows.
+    """
+    __tablename__ = "outbound_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # FK context — which inbound order (if any) this is a reply to.
+    in_reply_to_order_id = Column(
+        UUID(as_uuid=True), ForeignKey("inbound_orders.id"), nullable=True
+    )
+
+    # Denormalised copy of the parent order's thread_id (same reasoning as
+    # MatchResult's denormalised vessel snapshot below — don't collapse this
+    # into a foreign-key-only relationship; carrying thread_id forward here
+    # gives a coherent Sent view later without a join back to
+    # inbound_orders). Null when in_reply_to_order_id is null.
+    thread_id = Column(String(255), nullable=True)
+
+    # Envelope
+    from_addr = Column(String(255), nullable=False)
+    to_addr = Column(String(255), nullable=False)
+    cc_addr = Column(String(255), nullable=True)
+    subject = Column(String(500), nullable=False)
+    body = Column(Text, nullable=False)
+
+    # RFC 2822 threading headers on the outbound message itself.
+    message_id = Column(String(255), nullable=True)  # our own generated Message-ID
+    in_reply_to = Column(String(255), nullable=True)
+    references = Column(Text, nullable=True)
+
+    sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    send_status = Column(String(20), nullable=False)  # "sent" / "failed"
+    error_message = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_outbound_messages_in_reply_to_order_id", "in_reply_to_order_id"),
+        Index("ix_outbound_messages_sent_at", "sent_at"),
+    )
+
+
 # ── Signal Ocean cache ────────────────────────────────────────────────────────
 
 class CachedVessel(Base):
