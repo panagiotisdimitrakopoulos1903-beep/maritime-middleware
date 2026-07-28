@@ -7,6 +7,11 @@
  *   • Time received
  *   • Parse confidence indicator
  *   • Top match score if available
+ *
+ * `read` (ADR 0004, Decision #7) drives a quieter visual treatment for
+ * already-opened orders — distinct from the `newOrderIds`-driven pulsing
+ * accent dot in OrderList.jsx, which means "just arrived" (a separate,
+ * temporary concept, not persisted read/unread state).
  */
 
 const styles = {
@@ -24,12 +29,12 @@ const styles = {
     justifyContent: "space-between",
     marginBottom: 3,
   },
-  cargo: {
-    fontWeight: 600,
+  cargo: (read) => ({
+    fontWeight: read ? 400 : 600,
     fontSize: 12,
-    color: "var(--text-primary)",
+    color: read ? "var(--text-secondary)" : "var(--text-primary)",
     textTransform: "capitalize",
-  },
+  }),
   time: {
     fontSize: 10,
     color: "var(--text-muted)",
@@ -90,7 +95,7 @@ function timeAgo(isoString) {
   return `${Math.round(diff / 3600)}h ago`;
 }
 
-export default function OrderCard({ order, selected, onClick }) {
+export default function OrderCard({ order, selected, read, onClick }) {
   const topScore = order.top_match?.total_score;
   const qty = order.quantity_mt
     ? `${(order.quantity_mt / 1000).toFixed(0)}k MT`
@@ -104,7 +109,7 @@ export default function OrderCard({ order, selected, onClick }) {
       onMouseLeave={e => !selected && (e.currentTarget.style.background = "transparent")}
     >
       <div style={styles.top}>
-        <span style={styles.cargo}>
+        <span style={styles.cargo(read)}>
           {order.has_low_confidence_fields && (
             <span style={styles.warnDot} title="Low confidence fields" />
           )}

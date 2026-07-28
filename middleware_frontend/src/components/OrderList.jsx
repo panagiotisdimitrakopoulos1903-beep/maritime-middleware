@@ -176,6 +176,11 @@ export default function OrderList({ selectedId, onSelect, newOrderIds }) {
                 <OrderCard
                   order={order}
                   selected={order.order_id === selectedId}
+                  // Treat as "read" once selected too, not just once
+                  // is_read comes back true from the next poll (up to
+                  // 20s away) — avoids a stale-looking unread row on the
+                  // very interaction that marks it read.
+                  read={order.is_read || order.order_id === selectedId}
                   onClick={() => onSelect(order.order_id)}
                 />
               </div>

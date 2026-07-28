@@ -107,6 +107,9 @@ export default function App() {
       next.delete(orderId);
       return next;
     });
+    // Mark read (ADR 0004, Decision #7) — fire-and-forget, local-only,
+    // no bearing on order selection if it fails.
+    api.markOrderRead(orderId);
   }, [selectedOrderId, loadOrder]);
 
   return (

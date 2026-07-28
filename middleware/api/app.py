@@ -5,6 +5,7 @@ Endpoints:
   POST /internal/ingest      — called by Milter with raw email body
   GET  /matches/{order_id}   — get ranked matches for an order
   GET  /orders/latest        — latest N orders with their matches
+  PATCH /orders/{order_id}/read — mark an order as read (local-only, ADR 0004 Decision #7)
   GET  /sent                 — latest N outbound (Sent) messages
   GET  /status               — system health (cache age, vessel count)
   WS   /ws                   — WebSocket push to Electron panel
@@ -635,12 +636,37 @@ async def get_latest_orders(limit: int = 20):
                 "message_id": order.message_id,
                 "in_reply_to": order.in_reply_to,
                 "thread_id": order.thread_id,
+                "is_read": order.is_read,
                 "top_match": {
                     "vessel_name": top_match.vessel_name,
                     "total_score": top_match.total_score,
                 } if top_match else None,
             })
         return result
+    finally:
+        session.close()
+
+
+@app.patch("/orders/{order_id}/read")
+async def mark_order_read(order_id: str):
+    """
+    Mark an order as read (ADR 0004, Decision #7).
+
+    Local-Postgres-only — deliberately NOT synced to the real mailbox's IMAP
+    \\Seen flag (mcp/imap_client.py's connection is readonly=True on
+    purpose). Idempotent: called on an already-read order just re-sets
+    is_read=True and returns the same shape, no special-cased error.
+    """
+    session: Session = get_session(engine)
+    try:
+        order = session.query(InboundOrder).filter_by(id=order_id).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        order.is_read = True
+        session.commit()
+
+        return {"order_id": str(order.id), "is_read": True}
     finally:
         session.close()
 

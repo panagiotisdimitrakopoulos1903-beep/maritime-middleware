@@ -51,6 +51,14 @@ class InboundOrder(Base):
     references = Column(Text, nullable=True)
     thread_id = Column(String(255), nullable=True)
 
+    # Read/unread state for the WT3-clone email client (ADR 0004, Decision
+    # #7). Local-Postgres-only, mutated only by the clone's own UI when the
+    # broker opens an order — deliberately NOT synced to the real mailbox's
+    # IMAP \Seen flag (mcp/imap_client.py's connection is readonly=True on
+    # purpose). WT3 and the clone showing divergent read-state for the same
+    # message is an accepted, documented tradeoff, not a bug.
+    is_read = Column(Boolean, nullable=False, default=False)
+
     # Parsed structured fields
     cargo_type = Column(String(100))
     quantity_mt = Column(Float)

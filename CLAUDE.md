@@ -259,6 +259,30 @@ WebSocket/polling (fetched once on-demand when the tab is opened) since
 there's no live-push for outbound messages in this codebase. Inbox
 behavior is completely unchanged.
 
+**Read/unread (built 2026-07-28, ADR 0004 Decision #7 — final piece of ADR
+0004; the ADR's full scope is now built):** `InboundOrder.is_read`
+(migration `0007_is_read`, `server_default=sa.false()` so existing rows
+backfill in the same `ALTER TABLE` step) is **local-Postgres-only,
+deliberately never synced to the real mailbox's IMAP `\Seen` flag** —
+`mcp/imap_client.py`'s connection stays `readonly=True` exactly as before;
+WT3 and the clone showing divergent read-state for the same message is an
+accepted, documented tradeoff (ADR 0004 Decision #7's Reasoning), not a bug.
+New idempotent `PATCH /orders/{order_id}/read` (calling it on an
+already-read order just re-sets `is_read=True`, no special-cased error);
+`is_read` also added to `GET /orders/latest`'s per-order dict.
+`App.jsx::handleSelectOrder` fires `api.markOrderRead()` fire-and-forget
+alongside its existing `newOrderIds` clear — a failed mark-read has no
+broker-visible consequence, so `api.js`'s new `patch()` helper swallows
+errors internally rather than surfacing them like `post()` does for
+`sendReply`. `OrderCard.jsx`'s read/unread visual treatment (font-weight
+600→400, `--text-primary`→`--text-secondary`) is kept deliberately
+separate from `OrderList.jsx`'s existing `newOrderIds`-driven pulsing
+accent dot — "just arrived via WebSocket" and "not yet opened" are
+different concepts and are not merged. `OrderList.jsx` treats a row as
+read if `order.is_read` OR it's the currently-selected order, so a
+just-opened row updates immediately instead of waiting up to 20s for the
+next poll.
+
 ### Database (`middleware/database/`)
 
 SQLAlchemy 2.0 models (`models.py`) + Alembic migrations (`migrations/`).
@@ -287,7 +311,7 @@ MCP so Claude reads the WT3 mailbox.
 |---|---|---|---|
 | Ingestion | IMAP MCP server, Claude reads inbox | Milter → REST `/internal/ingest` (legacy, retiring) | **IMAP MCP** — built in `middleware/mcp/`, mock mode confirmed |
 | Signal Ocean | Signal Ocean MCP server | Direct `signal-ocean` SDK, Postgres cache + `signal_server.py` MCP | MCP server built; backend cache path unchanged for now |
-| UI | Full WT3 UI clone | Companion Electron panel beside WT3 | Unchanged — companion panel, not a clone |
+| UI | Full WT3 UI clone | Companion Electron panel beside WT3 | **ADR 0004 fully implemented (2026-07-28)** — the panel gained real email-client capability (reply compose/send, RFC 2822 threading, Inbox/Sent folders, read/unread) per PRD §11.2's "WT3 Clone Email Client" scope, resolving that PRD's §1.4-vs-§11.2 contradiction (ADR 0004 Decision #2). Still architecturally a companion panel, not a pixel-for-pixel WT3 clone — frameless, docks beside WT3, doesn't replace its window; "clone" refers to email-client *capability* (compose/reply/threading/folders), not UI replication |
 | Claude's role | Agentic loop with MCP tool access | One-shot SDK call in `llm_parser.py` | **Implemented** (ADR 0002, decided and built 2026-07-26) — one-shot `llm_parser.py` stays; MCP is interactive-only, not the production ingestion loop |
 | Five-agent system | Five specialized agents | `.claude/agents/` (5 agents) | **Implemented** — `architect` (ADR 0002/0003), `coder` (both ADRs built, `signal_client.py` fixes, `requirements.txt`, doc cleanup), `debug` (`test_scheduler_jobs.py`, `test_signal_client_mcp.py`), and `ceo` (this file, repeatedly) have produced verifiable output today; `briefing` has not yet been exercised — no daily-summary artifacts or commits attributable to it exist in the repo |
 
