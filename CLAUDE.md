@@ -291,7 +291,21 @@ Route resolution to `architect` unless noted otherwise.
 | IMAP UID stability as the `source_message_id` dedup key on a real (non-mock) mailbox — `middleware/mcp/imap_client.py` supplies the UID as the id, `scheduler/jobs.py::_poll_imap_inbox` dedupes against it via `InboundOrder.source_message_id`; a `UIDVALIDITY` reset on the broker's mail server could reassign UIDs and defeat dedup | ADR 0002, Open questions #1 | Not a blocker for `IMAP_MODE=mock` (fixed ids) or initial live rollout; resolved once `debug` tests against the real WT3 mailbox before go-live and confirms UID reuse doesn't occur across a `UIDVALIDITY` reset — or `imap_client.py` is changed to hash the `Message-ID` header as a more robust key instead |
 | Whether `middleware/api/app.py::_broadcast_new_matches` should batch multiple pending payloads if several orders complete in a very tight window, rather than scheduling one coroutine per order | ADR 0003, Open questions #1 | Not addressed in ADR 0003 — current ingestion rate (one broker mailbox, `imap_poll_interval_minutes=2`) makes this a non-issue in practice; revisit only if push volume grows |
 | Whether the Electron panel needs a missed-broadcast recovery path (e.g. catch up via `/orders/latest` on reconnect) | ADR 0003, Open questions #2 | Low priority — not in scope of the ADR 0003 fix, which restores real-time delivery only |
-| `GET /status` throws a 500 (`TypeError: can't subtract offset-naive and offset-aware datetimes`) whenever a `SignalCacheRefresh` row exists — `database/models.py`'s `refreshed_at` column has no `timezone=True`, so Postgres/SQLAlchemy hands back a naive `datetime`, but `get_status()` (`api/app.py`) subtracts it from `datetime.now(timezone.utc)` | Found 2026-07-28 while testing the reply-compose UI (unrelated pre-existing bug, confirmed to predate that work via `git log -L`) | Not yet fixed — flagged here so it isn't lost. Fix is either add `timezone=True` to the column (+ a migration) or normalize on read in `signal_client/client.py::get_last_refresh()` |
+
+**Resolved (2026-07-28):** `GET /status`'s 500 (`TypeError: can't subtract
+offset-naive and offset-aware datetimes`), found while testing the
+reply-compose UI — `SignalCacheRefresh.refreshed_at` (`database/models.py`)
+is now `DateTime(timezone=True)` with a proper aware default
+(`datetime.now(timezone.utc)`, not the naive `datetime.utcnow`), via
+migration `0006_signal_cache_refresh_tz`. The migration uses `ALTER COLUMN
+... USING refreshed_at AT TIME ZONE 'UTC'` in both directions so existing
+naive-UTC values are reinterpreted correctly rather than shifted by
+whatever session `TimeZone` happens to be active.
+`database/seed.py`'s matching `.replace(tzinfo=None)` workaround was
+removed. Verified against the local Postgres instance (`\d
+signal_cache_refreshes` shows `timestamp with time zone`) and by
+reproducing the original crash before the fix and confirming `get_status()`
+returns cleanly after it. Full suite 90/90 green.
 
 **Blocking `SIGNAL_MODE=live` production trust** — no real Signal Ocean API
 key has been available to verify any of these three judgment calls made

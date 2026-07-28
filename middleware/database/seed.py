@@ -436,7 +436,7 @@ def seed(db_url: str = DB_URL, clear_existing: bool = True):
         for i in range(6):
             session.add(SignalCacheRefresh(
                 id=uuid.uuid4(),
-                refreshed_at=(NOW - timedelta(minutes=5 * i)).replace(tzinfo=None),
+                refreshed_at=(NOW - timedelta(minutes=5 * i)),
                 vessel_count=len(VESSELS),
                 success=True,
                 duration_ms=random.randint(800, 2400),

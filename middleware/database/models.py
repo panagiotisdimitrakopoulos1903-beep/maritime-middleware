@@ -1,7 +1,7 @@
 """
 database/models.py — SQLAlchemy models for all persisted data
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import (
     create_engine, Column, String, Float, Integer,
@@ -204,7 +204,11 @@ class SignalCacheRefresh(Base):
     __tablename__ = "signal_cache_refreshes"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    refreshed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    refreshed_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
     vessel_count = Column(Integer)
     success = Column(Boolean, default=True)
     error_message = Column(Text)
