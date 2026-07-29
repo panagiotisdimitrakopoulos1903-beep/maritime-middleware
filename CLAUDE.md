@@ -520,18 +520,29 @@ breaks again:
   doesn't exist. This is the documented opt-out, not a workaround.
 
 No custom app icon exists yet (`public/` has no `.icns`) — the packaged
-app uses electron-builder's default Electron icon. `electron/main.js`
-gained one permanent startup log line (`resolved BACKEND_URL=... isPackaged=... isDev=...`)
-as an ops diagnostic, added while verifying `BACKEND_URL` propagation.
+app uses electron-builder's default Electron icon.
 
-**Known gap, not fixed here**: `BACKEND_URL` (env var) is confirmed to
-propagate correctly when the packaged binary is launched directly from a
-terminal (`BACKEND_URL=... "Maritime Panel.app/Contents/MacOS/Maritime Panel"`).
-It should **not** be assumed to work for a real end-user double-clicking
-the app from Finder — macOS GUI-launched apps run in a separate
-launchd/Aqua session and don't reliably inherit an interactive shell's
-exported env vars. A real deployment needing a non-default backend
-location (e.g. an IT-configured broker desk, not this dev machine) would
-need a different mechanism — a config file read at startup, most likely —
-not a shell env var. Not designed here; flagged for whoever picks up
-real end-user deployment.
+**Backend URL config (fixed 2026-07-29 — closes the Finder-launch gap
+noted above when this section was first written):** `electron/main.js`'s
+`resolveBackendUrl()` now checks, in order: `process.env.BACKEND_URL` (dev
+workflow, unchanged) → a `config.json` at `app.getPath("userData")` +
+`/config.json` (empirically resolved to
+`~/Library/Application Support/maritime-middleware-panel/config.json` on
+macOS — keyed off `package.json`'s `"name"` field, **not**
+`productName`/`appId`, don't assume otherwise) → the hardcoded
+`http://127.0.0.1:5000` default. The config file is created automatically
+with the default on first run if missing (zero-config out of the box); if
+it exists but is corrupt/unreadable, it's left untouched on disk (not
+silently overwritten) and the in-memory default is used for that session,
+with a warning logged. This is what a real end-user double-clicking the
+packaged app from Finder should use to point at a non-default backend — a
+config file, not an env var, since GUI-launched macOS apps don't reliably
+inherit an interactive shell's exported env vars (confirmed by testing the
+packaged binary with a fully stripped environment via `env -i`, not just
+inferred). The startup log line now also names which source won
+(`source=env var|config file|default`). No automated test coverage exists
+yet for `electron/main.js` (no `*.test.js` in `middleware_frontend/`) —
+verification so far is empirical (packaged-binary + `env -i`, all three
+precedence cases independently re-confirmed); a small Jest test mocking
+`electron.app.getPath`/`fs` around `resolveBackendUrl()`'s branches would
+be cheap insurance against a silent regression later.
