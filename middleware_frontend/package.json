@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Maritime broker deal matching panel",
   "main": "electron/main.js",
+  "homepage": ".",
   "scripts": {
     "start": "concurrently \"npm run react\" \"wait-on http://localhost:3000 && electron .\"",
     "react": "react-scripts start",
@@ -22,8 +23,16 @@
     "wait-on": "^7.2.0"
   },
   "build": {
+    "extends": null,
     "appId": "com.maritime.middleware",
     "productName": "Maritime Panel",
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "package.json",
+      "!src/**/*",
+      "!public/index.html"
+    ],
     "win": {
       "target": "nsis",
       "icon": "public/icon.ico"
@@ -31,6 +40,14 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business",
+      "identity": null
+    },
+    "dmg": {
+      "sign": false
     }
   },
   "browserslist": {

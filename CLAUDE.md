@@ -482,3 +482,56 @@ npm start   # React dev server + Electron together
 Milter is **retiring** — do not run `python -m milter.hook` for new work.
 Local dev uses IMAP MCP (mock mode), seed data, or a manual
 `POST /internal/ingest`.
+
+## Packaging (macOS, built 2026-07-29)
+
+`middleware_frontend`'s `"build"` field in `package.json` now produces a
+real unsigned `.dmg` via `electron-builder` (previously only referenced in
+the `"dist"` script, never actually run):
+
+```bash
+cd middleware_frontend
+npm run build   # production React build — must run before packaging
+CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dmg
+```
+
+Produces `dist/Maritime Panel-<version>-<arch>.dmg` plus an unpacked
+`dist/<arch>/Maritime Panel.app` (arch is `mac-arm64` on Apple Silicon,
+`mac` on Intel). `identity: null` (config) + `CSC_IDENTITY_AUTO_DISCOVERY=false`
+(env) together skip code signing — there's no Apple Developer ID on this
+machine; the build is unsigned and untested for Gatekeeper/notarization.
+
+Two non-obvious fixes were needed, both worth knowing if this build ever
+breaks again:
+
+- **`"homepage": "."`** (top-level `package.json` field) — without it, CRA
+  emits absolute asset paths (`/static/js/...`) in `build/index.html`,
+  which 404 under Electron's `file://` protocol in the packaged app
+  (works in dev only because dev mode loads the dev server via `http://`,
+  not `loadFile`). Confirmed by direct inspection of the built
+  `index.html` before/after, not assumed.
+- **`"build.extends": null`** — electron-builder auto-detects
+  `react-scripts` in `package.json` and silently applies its built-in
+  `react-cra` preset (`node_modules/app-builder-lib/out/util/config.js`),
+  which force-overrides the entry point to the `build/electron.js`
+  convention this project doesn't use (real entry:
+  `electron/main.js`, per `package.json`'s own `"main"` field). Without
+  `"extends": null` the build fails outright looking for a file that
+  doesn't exist. This is the documented opt-out, not a workaround.
+
+No custom app icon exists yet (`public/` has no `.icns`) — the packaged
+app uses electron-builder's default Electron icon. `electron/main.js`
+gained one permanent startup log line (`resolved BACKEND_URL=... isPackaged=... isDev=...`)
+as an ops diagnostic, added while verifying `BACKEND_URL` propagation.
+
+**Known gap, not fixed here**: `BACKEND_URL` (env var) is confirmed to
+propagate correctly when the packaged binary is launched directly from a
+terminal (`BACKEND_URL=... "Maritime Panel.app/Contents/MacOS/Maritime Panel"`).
+It should **not** be assumed to work for a real end-user double-clicking
+the app from Finder — macOS GUI-launched apps run in a separate
+launchd/Aqua session and don't reliably inherit an interactive shell's
+exported env vars. A real deployment needing a non-default backend
+location (e.g. an IT-configured broker desk, not this dev machine) would
+need a different mechanism — a config file read at startup, most likely —
+not a shell env var. Not designed here; flagged for whoever picks up
+real end-user deployment.
