@@ -540,9 +540,21 @@ config file, not an env var, since GUI-launched macOS apps don't reliably
 inherit an interactive shell's exported env vars (confirmed by testing the
 packaged binary with a fully stripped environment via `env -i`, not just
 inferred). The startup log line now also names which source won
-(`source=env var|config file|default`). No automated test coverage exists
-yet for `electron/main.js` (no `*.test.js` in `middleware_frontend/`) —
-verification so far is empirical (packaged-binary + `env -i`, all three
-precedence cases independently re-confirmed); a small Jest test mocking
-`electron.app.getPath`/`fs` around `resolveBackendUrl()`'s branches would
-be cheap insurance against a silent regression later.
+(`source=env var|config file|default`).
+
+**Test coverage (added 2026-07-29):** `resolveBackendUrl()` was extracted
+verbatim (pure move, no logic change — the original was already
+empirically verified against a real packaged app) from `main.js` into
+`electron/backendUrl.js`, since it only needs `electron`'s `app.getPath`
+plus Node's `fs`/`path` — a much smaller surface to mock than the rest of
+`main.js` (`BrowserWindow`/`screen`/`ipcMain`/`shell`/`app.whenReady`).
+`electron/backendUrl.test.js` (7 tests, `jest.mock("electron")` +
+`jest.mock("fs")`) covers all three precedence cases plus the file-safety
+edge cases — missing file (creates default), corrupt JSON / missing
+`backendUrl` field / non-ENOENT read error (all correctly leave the file
+**un**touched on disk rather than overwriting it, matching the deliberate
+"don't destroy a human's edit" design). Run via
+`npm run test:electron` (`middleware_frontend/`) — a new, deliberately
+separate Jest setup (`jest.config.js`, scoped to `electron/**/*.test.js`)
+from the React app's own tooling, which this project doesn't currently
+wire up a test script for either.
