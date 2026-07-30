@@ -86,6 +86,19 @@ const styles = {
     marginRight: 4,
     verticalAlign: "middle",
   },
+  // Parse-failure indicator (ADR 0007, Decision 4) — deliberately the same
+  // restrained size/shape as warnDot, just the --red token instead of
+  // --amber. No full-row background, no animation — a broker should be
+  // able to spot this scanning the list without it reading as an alarm.
+  failedDot: {
+    width: 5,
+    height: 5,
+    borderRadius: "50%",
+    background: "var(--red)",
+    display: "inline-block",
+    marginRight: 4,
+    verticalAlign: "middle",
+  },
 };
 
 function timeAgo(isoString) {
@@ -97,6 +110,7 @@ function timeAgo(isoString) {
 
 export default function OrderCard({ order, selected, read, onClick }) {
   const topScore = order.top_match?.total_score;
+  const failedParse = order.parse_status === "failed";
   const qty = order.quantity_mt
     ? `${(order.quantity_mt / 1000).toFixed(0)}k MT`
     : "";
@@ -110,10 +124,14 @@ export default function OrderCard({ order, selected, read, onClick }) {
     >
       <div style={styles.top}>
         <span style={styles.cargo(read)}>
-          {order.has_low_confidence_fields && (
-            <span style={styles.warnDot} title="Low confidence fields" />
+          {failedParse ? (
+            <span style={styles.failedDot} title="Parsing failed — needs review" />
+          ) : (
+            order.has_low_confidence_fields && (
+              <span style={styles.warnDot} title="Low confidence fields" />
+            )
           )}
-          {order.cargo_type || "Unknown cargo"}
+          {failedParse ? "Parsing failed — needs review" : (order.cargo_type || "Unknown cargo")}
           {qty && <span style={{ color: "var(--text-secondary)", fontWeight: 400 }}> · {qty}</span>}
         </span>
         <span style={styles.time}>{timeAgo(order.received_at)}</span>

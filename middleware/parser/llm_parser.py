@@ -58,6 +58,16 @@ class ParsedOrder(BaseModel):
     raw_llm_response: Optional[str] = None
     error: Optional[str] = None
 
+    # Explicit success/failure signal (ADR 0007). "failed" only for an
+    # outright exception in parse_message() (JSON decode error, or any other
+    # exception — in practice tenacity's RetryError after _call_llm's
+    # retries are exhausted). A structurally successful parse stays
+    # "success" regardless of how low parse_confidence ends up, including
+    # the all-null-fields case — that's a real (if weak) judgment call by
+    # the model, not an infrastructure failure. Two values only, not three
+    # — see ADR 0007 Decision 1 for why "partial" was rejected.
+    parse_status: str = "success"   # "success" | "failed"
+
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -239,10 +249,12 @@ def parse_message(raw_body: str) -> ParsedOrder:
         log.error("parse_message.json_error", error=str(e))
         order.error = f"JSON decode error: {e}"
         order.parse_confidence = 0.0
+        order.parse_status = "failed"
 
     except Exception as e:
         log.error("parse_message.error", error=str(e))
         order.error = str(e)
         order.parse_confidence = 0.0
+        order.parse_status = "failed"
 
     return order

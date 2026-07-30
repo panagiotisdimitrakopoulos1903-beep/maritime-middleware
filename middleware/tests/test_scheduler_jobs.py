@@ -306,6 +306,8 @@ class _FakeParsed:
         self.parse_confidence = 0.9
         self.has_low_confidence_fields = False
         self.low_confidence_field_names = []
+        self.parse_status = "success"
+        self.error = None
 
 
 class _FakeWebSocket:

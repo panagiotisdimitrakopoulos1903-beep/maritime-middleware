@@ -10,6 +10,7 @@
  */
 import { useState } from "react";
 import ParsedOrderSummary from "./ParsedOrderSummary";
+import FailedParseNotice from "./FailedParseNotice";
 import DealCard from "./DealCard";
 import ComposeReply from "./ComposeReply";
 
@@ -176,6 +177,21 @@ export default function MatchPanel({ order, loading }) {
             <SkeletonCard />
             <SkeletonCard />
             <SkeletonCard />
+          </>
+        ) : order.parse_status === "failed" ? (
+          <>
+            <FailedParseNotice
+              order={order}
+              onReply={() => setComposeOpen(true)}
+            />
+
+            {composeOpen && (
+              <ComposeReply
+                key={order.order_id}
+                order={order}
+                onClose={() => setComposeOpen(false)}
+              />
+            )}
           </>
         ) : (
           <>

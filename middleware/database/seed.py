@@ -204,6 +204,7 @@ INBOUND_MESSAGES = [
         "laycan_end": NOW + timedelta(days=20),
         "vessel_type": "Panamax",
         "parse_confidence": 0.96,
+        "parse_status": "success",
         "has_low_confidence": False,
         "confidence_scores": {
             "cargo_type": 0.99, "quantity_mt": 0.95, "load_port": 0.97,
@@ -228,6 +229,7 @@ INBOUND_MESSAGES = [
         "laycan_end": NOW + timedelta(days=25),
         "vessel_type": "Panamax",
         "parse_confidence": 0.91,
+        "parse_status": "success",
         "has_low_confidence": False,
         "confidence_scores": {
             "cargo_type": 0.97, "quantity_mt": 0.94, "load_port": 0.96,
@@ -257,6 +259,7 @@ INBOUND_MESSAGES = [
         "vessel_type": "Aframax",
         "freight_rate": "WS 65",
         "parse_confidence": 0.94,
+        "parse_status": "success",
         "has_low_confidence": False,
         "confidence_scores": {
             "cargo_type": 0.98, "quantity_mt": 0.96, "load_port": 0.95,
@@ -281,6 +284,7 @@ INBOUND_MESSAGES = [
         "laycan_end": NOW + timedelta(days=18),
         "vessel_type": "Handymax",
         "parse_confidence": 0.87,
+        "parse_status": "success",
         "has_low_confidence": True,
         "confidence_scores": {
             "cargo_type": 0.95, "quantity_mt": 0.91, "load_port": 0.96,
@@ -308,12 +312,47 @@ INBOUND_MESSAGES = [
         "laycan_end": NOW + timedelta(days=31),
         "vessel_type": "Handymax",
         "parse_confidence": 0.93,
+        "parse_status": "success",
         "has_low_confidence": False,
         "confidence_scores": {
             "cargo_type": 0.97, "quantity_mt": 0.93, "load_port": 0.96,
             "discharge_port": 0.89, "laycan_start": 0.94, "laycan_end": 0.94,
         },
         "best_match_class": "Handymax",
+    },
+    # Failed-parse fixture (ADR 0007) — mirrors what the real pipeline
+    # produces when parse_message() raises outright (exhausted tenacity
+    # retries, e.g. an invalid ANTHROPIC_API_KEY): every field left at its
+    # ParsedOrder default (None value / 0.0 confidence), parse_confidence
+    # 0.0, parse_error populated with a realistic exception repr, and
+    # parse_status="failed" — NOT "success" with an empty body. No
+    # MatchResult rows are created for this row below, matching
+    # api/app.py::_process_inbound's Step 3/4 gating.
+    {
+        "sender": "ops@garbled-telex.example.com",
+        "subject": "Fwd: fwd: (no subject)",
+        "raw_body": (
+            "sdfkjh 25 wtv rt possibly grain???\n"
+            "call me\n"
+            "----- forwarded attachment could not be displayed -----"
+        ),
+        "cargo_type": None, "quantity_mt": None,
+        "quantity_min_mt": None, "quantity_max_mt": None,
+        "load_port": None, "load_port_canonical": None,
+        "discharge_port": None, "discharge_port_canonical": None,
+        "laycan_start": None, "laycan_end": None,
+        "vessel_type": None,
+        "parse_confidence": 0.0,
+        "parse_status": "failed",
+        "parse_error": (
+            "RetryError[<Future at 0x7f2b1c3a5e10 state=finished "
+            "raised AuthenticationError>]"
+        ),
+        "has_low_confidence": False,
+        "confidence_scores": {
+            "cargo_type": 0.0, "quantity_mt": 0.0, "load_port": 0.0,
+            "discharge_port": 0.0, "laycan_start": 0.0, "laycan_end": 0.0,
+        },
     },
 ]
 
@@ -464,16 +503,25 @@ def seed(db_url: str = DB_URL, clear_existing: bool = True):
                 load_port_canonical=msg["load_port_canonical"],
                 discharge_port=msg["discharge_port"],
                 discharge_port_canonical=msg["discharge_port_canonical"],
-                laycan_start=msg["laycan_start"].replace(tzinfo=None),
-                laycan_end=msg["laycan_end"].replace(tzinfo=None),
+                laycan_start=msg["laycan_start"].replace(tzinfo=None) if msg.get("laycan_start") else None,
+                laycan_end=msg["laycan_end"].replace(tzinfo=None) if msg.get("laycan_end") else None,
                 vessel_type=msg["vessel_type"],
                 freight_rate=msg.get("freight_rate"),
                 parse_confidence=msg["parse_confidence"],
                 has_low_confidence_fields=msg["has_low_confidence"],
                 confidence_scores=msg["confidence_scores"],
+                parse_status=msg["parse_status"],
+                parse_error=msg.get("parse_error"),
             )
             session.add(order_row)
             session.flush()
+
+            # Matching is skipped entirely for a failed parse (ADR 0007,
+            # Decision 2) — no vessel scoring, no MatchResult rows. Mirrors
+            # api/app.py::_process_inbound's Step 3/4 gating so seed data
+            # never disagrees with the live pipeline's behavior.
+            if msg["parse_status"] == "failed":
+                continue
 
             # Score every available vessel against this order
             scores = []
@@ -509,11 +557,13 @@ def seed(db_url: str = DB_URL, clear_existing: bool = True):
                 ))
 
         session.commit()
+        successful_orders = sum(1 for m in INBOUND_MESSAGES if m["parse_status"] == "success")
+        failed_orders = len(INBOUND_MESSAGES) - successful_orders
         print()
         print("  ✓  Seed complete.")
         print(f"     {len(VESSELS)} vessels in cache")
-        print(f"     {len(INBOUND_MESSAGES)} inbound orders")
-        print(f"     {len(INBOUND_MESSAGES) * 5} match results")
+        print(f"     {len(INBOUND_MESSAGES)} inbound orders ({successful_orders} parsed, {failed_orders} failed-parse)")
+        print(f"     {successful_orders * 5} match results")
         print()
         print("  The frontend developer can now connect to:")
         print("     GET  /orders/latest    — order list")

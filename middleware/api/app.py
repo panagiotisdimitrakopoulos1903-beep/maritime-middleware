@@ -110,6 +110,8 @@ class MatchResponse(BaseModel):
     parse_confidence: float
     has_low_confidence_fields: bool
     low_confidence_fields: list[str]
+    parse_status: str
+    parse_error: Optional[str]
 
     # Ranked matches
     matches: list[dict]
@@ -259,35 +261,47 @@ def _process_inbound(
             has_low_confidence_fields=parsed.has_low_confidence_fields,
             low_confidence_field_names=parsed.low_confidence_field_names,
             parse_error=parsed.error,
+            parse_status=parsed.parse_status,
         )
         session.add(order_row)
         session.commit()
 
-        # ── Step 3: Match ─────────────────────────────────────────────────────
+        # ── Step 3/4: Match + persist matches ─────────────────────────────────
+        # Skipped entirely (not run-and-discarded) when the parse failed
+        # outright — running the matching engine against an essentially
+        # empty ParsedOrder produces a flat, fabricated neutral score on
+        # every candidate vessel that looks identical to a real borderline
+        # match. See ADR 0007, Decision 2.
         signal_client = SignalCacheClient(session)
-        vessels = signal_client.get_available_vessels()
-        ranked = matching_engine.rank(vessels, parsed)
+        if parsed.parse_status == "failed":
+            ranked = []
+            log.warning("pipeline.parse_failed_skip_matching", order_id=str(order_id))
+        else:
+            vessels = signal_client.get_available_vessels()
+            ranked = matching_engine.rank(vessels, parsed)
 
-        # ── Step 4: Persist matches ───────────────────────────────────────────
-        for sv in ranked:
-            session.add(MatchResult(
-                order_id=order_id,
-                vessel_id=sv.vessel_id,
-                vessel_name=sv.vessel_name,
-                vessel_class=sv.vessel_class,
-                dwt=sv.dwt,
-                open_port=sv.open_port,
-                open_date=sv.open_date,
-                rank=sv.rank,
-                total_score=sv.total_score,
-                score_vessel_size=sv.score_vessel_size,
-                score_geography=sv.score_geography,
-                score_date_overlap=sv.score_date_overlap,
-                score_cargo_type=sv.score_cargo_type,
-            ))
-        session.commit()
+            for sv in ranked:
+                session.add(MatchResult(
+                    order_id=order_id,
+                    vessel_id=sv.vessel_id,
+                    vessel_name=sv.vessel_name,
+                    vessel_class=sv.vessel_class,
+                    dwt=sv.dwt,
+                    open_port=sv.open_port,
+                    open_date=sv.open_date,
+                    rank=sv.rank,
+                    total_score=sv.total_score,
+                    score_vessel_size=sv.score_vessel_size,
+                    score_geography=sv.score_geography,
+                    score_date_overlap=sv.score_date_overlap,
+                    score_cargo_type=sv.score_cargo_type,
+                ))
+            session.commit()
 
         # ── Step 5: Push to WebSocket clients ─────────────────────────────────
+        # Runs unconditionally, including on a failed parse — the broker's
+        # panel should still learn a new message arrived in real time;
+        # `matches` is simply [] when Step 3/4 were skipped above.
         _push_to_websockets(order_id, parsed, ranked, signal_client.get_last_refresh())
 
         log.info(
@@ -341,6 +355,8 @@ def _push_to_websockets(
             "parse_confidence": parsed.parse_confidence,
             "has_low_confidence_fields": parsed.has_low_confidence_fields,
             "low_confidence_fields": parsed.low_confidence_field_names,
+            "parse_status": parsed.parse_status,
+            "parse_error": parsed.error,
         },
         "matches": [
             {
@@ -578,6 +594,8 @@ async def get_matches(order_id: str):
             parse_confidence=order.parse_confidence or 0.0,
             has_low_confidence_fields=order.has_low_confidence_fields or False,
             low_confidence_fields=order.low_confidence_field_names or [],
+            parse_status=order.parse_status or "success",
+            parse_error=order.parse_error,
             matches=[
                 {
                     "rank": m.rank,
@@ -634,6 +652,8 @@ async def get_latest_orders(limit: int = 20):
                 "discharge_port_canonical": order.discharge_port_canonical,
                 "parse_confidence": order.parse_confidence,
                 "has_low_confidence_fields": order.has_low_confidence_fields,
+                "parse_status": order.parse_status,
+                "parse_error": order.parse_error,
                 "message_id": order.message_id,
                 "in_reply_to": order.in_reply_to,
                 "thread_id": order.thread_id,

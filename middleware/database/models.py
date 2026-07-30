@@ -89,6 +89,17 @@ class InboundOrder(Base):
     has_low_confidence_fields = Column(Boolean, default=False)
     parse_error = Column(Text)                # if parsing failed entirely
 
+    # Explicit success/failure signal (ADR 0007) — "success" or "failed".
+    # Distinct from parse_confidence/has_low_confidence_fields, which grade
+    # a *successful* parse's per-field quality: parse_status="failed" means
+    # parse_message() raised outright (JSON decode error, or tenacity's
+    # RetryError after retries are exhausted) and no real structured data
+    # was extracted at all. Matching is skipped entirely for these rows
+    # (api/app.py::_process_inbound) rather than run against a blank
+    # ParsedOrder and produce a fabricated flat-neutral score — see ADR
+    # 0007 for the bug this closes.
+    parse_status = Column(String(20), nullable=False, default="success")
+
     # Relationships
     matches = relationship("MatchResult", back_populates="order")
 
