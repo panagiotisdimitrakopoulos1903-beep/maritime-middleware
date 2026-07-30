@@ -106,6 +106,7 @@ class SignalCacheClient:
             )
 
             fetched_ids = set()
+            failed_classes: list[tuple[str, str]] = []
 
             for class_name in target_classes:
                 try:
@@ -135,17 +136,41 @@ class SignalCacheClient:
                         vessel_class=class_name,
                         error=str(e)
                     )
+                    failed_classes.append((class_name, str(e)))
                     continue
 
-            # Remove vessels no longer appearing in Signal (likely fixed)
-            self._prune_stale(fetched_ids)
+            # Only a fully clean pass (zero per-class failures) counts as
+            # success — a partial fetch must not be reported as healthy.
+            success = len(failed_classes) == 0
+
+            if success:
+                # Remove vessels no longer appearing in Signal (likely fixed).
+                # Only safe to run when every class fetched cleanly — otherwise
+                # we'd delete vessels that merely failed to fetch this cycle,
+                # not ones that genuinely left the market.
+                self._prune_stale(fetched_ids)
+                error_msg = None
+            else:
+                log.warning(
+                    "signal_client.prune_skipped",
+                    reason="partial_refresh_failure",
+                    failed_classes=[name for name, _ in failed_classes],
+                )
+                error_msg = (
+                    f"{len(failed_classes)}/{len(target_classes)} vessel classes "
+                    "failed: " + "; ".join(
+                        f"{name} ({err})" for name, err in failed_classes
+                    )
+                )
 
             duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-            self._log_refresh(vessel_count, True, None, duration_ms)
+            self._log_refresh(vessel_count, success, error_msg, duration_ms)
 
             log.info(
                 "signal_client.refresh_complete",
                 vessel_count=vessel_count,
+                success=success,
+                failed_classes=len(failed_classes),
                 duration_ms=duration_ms
             )
 

@@ -160,10 +160,35 @@ Not an MCP server — a direct wrapper around the `signal-ocean` Python SDK
 `coalesce=True`), and once immediately on app startup. It iterates a fixed
 list of vessel classes (Aframax, Suezmax, VLCC, Panamax, Capesize, Handymax,
 Handysize), upserts into `cached_vessels` by `vessel_id` (IMO), and prunes
-rows that no longer appear in Signal's response (assumed fixed/gone).
+rows that no longer appear in Signal's response (assumed fixed/gone) —
+**only when every class fetched cleanly** (fixed 2026-07-30, see below).
 `get_available_vessels()` — used by the matching engine — reads only this
 cache and never touches the live API, so matching latency is independent of
 Signal Ocean's response time.
+
+**Resolved (2026-07-30):** the first-ever daily briefing (`briefing` agent)
+found a real bug by querying the live DB directly: 7 consecutive refresh
+cycles all logged `success=true, vessel_count=0`, and the first of those
+cycles had deleted all 14 previously-cached vessels. Root cause,
+confirmed by tracing `refresh()`: the per-vessel-class loop caught and
+swallowed every exception (just a `log.warning`), so an invalid
+`SIGNAL_OCEAN_API_KEY` (a placeholder in this environment) made all 7
+classes fail silently — the outer function still hardcoded
+`success=True` after the loop regardless, and `_prune_stale()` ran
+unconditionally against the resulting empty fetch set, wiping the entire
+cache while every log line looked green. Fixed: `success` is now `True`
+only when zero classes failed; `_prune_stale()` is skipped entirely on
+any per-class failure (trading one extra cycle of staleness for never
+wiping real data based on an incomplete fetch); a partial/total failure's
+`error_message` names exactly which classes failed and why, so a broken
+refresh is visibly distinct from both a clean success and the pre-existing
+total pre-loop failure path. Verified against this environment's actual
+invalid API key directly (not just via tests): the resulting refresh row
+now correctly shows `success=false` with a descriptive `error_message`,
+and `cached_vessels` was confirmed unchanged before/after (14 → 14).
+Covered by `middleware/tests/test_signal_cache_refresh.py` (new file —
+this module had zero test coverage before, despite a stale comment in
+`test_signal_client_mcp.py` claiming otherwise). Full suite 98/98 green.
 
 ### Outbound SMTP send (`middleware/mail/smtp_client.py`)
 
