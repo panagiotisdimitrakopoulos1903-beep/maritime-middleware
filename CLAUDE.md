@@ -572,6 +572,22 @@ Milter is **retiring** — do not run `python -m milter.hook` for new work.
 Local dev uses IMAP MCP (mock mode), seed data, or a manual
 `POST /internal/ingest`.
 
+**Restart `uvicorn` after backend code changes (learned 2026-07-30, ADR
+0007).** `--reload`'s file-watching isn't something to blindly trust for
+correctness-sensitive verification — a stale dev process briefly
+reintroduced the exact bug ADR 0007 had just fixed (fabricated 50%-score
+`MatchResult` rows) into the dev database, because its in-memory code
+predated the fix. When in doubt, kill and restart the process (and
+re-seed if it wrote bad data) rather than assuming `--reload` picked up
+the change.
+
+**Manual spot-checks against the running app still matter.** The original
+ADR 0007 bug (fabricated 50% match scores on failed-parse orders) was
+caught by the user visually inspecting the live UI, not by the automated
+test suite — 90+ passing tests hadn't surfaced it. Automated coverage and
+manual verification are complementary; don't treat a green test suite as
+sufficient on its own for correctness-sensitive changes.
+
 ## Packaging (macOS, built 2026-07-29)
 
 `middleware_frontend`'s `"build"` field in `package.json` now produces a
