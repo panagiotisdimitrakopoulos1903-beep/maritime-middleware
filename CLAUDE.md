@@ -112,24 +112,30 @@ invoke the same `_process_inbound` function from a worker thread:
    etc). Returns a `ParsedOrder` where every field is `{value, confidence}`.
    Retried 3x with exponential backoff (`tenacity`) on transient failures.
    Ports are normalised via `core/ports.py::normalise_port()` against a
-   static alias table immediately after parsing.
+   static alias table immediately after parsing. `ParsedOrder.parse_status`
+   (`"success"`/`"failed"`, ADR 0007, **designed, not yet implemented**) is
+   set to `"failed"` only on an outright exception (JSON decode failure or
+   `tenacity` retries exhausted) — a structurally successful parse with
+   every field low/blank confidence is still `"success"`.
 2. **Persist order** — row written to `inbound_orders` including raw body,
-   parsed fields, per-field confidence JSON, and overall `parse_confidence`
+   parsed fields, per-field confidence JSON, overall `parse_confidence`
    (mean of six core fields; anything under
    `settings.parser_confidence_threshold` (0.75) is flagged in
-   `low_confidence_field_names`).
-3. **Match** — `SignalCacheClient.get_available_vessels()` reads **only**
-   the local Postgres cache (`cached_vessels`), never the live Signal Ocean
-   API in the request path. `MatchingEngine.rank()` scores every candidate
-   and returns the top `MATCH_TOP_N` (default 5).
+   `low_confidence_field_names`), and (ADR 0007, pending) `parse_status`.
+3. **Match** — skipped entirely when `parse_status == "failed"` (ADR 0007,
+   pending — see below). Otherwise, `SignalCacheClient.get_available_vessels()`
+   reads **only** the local Postgres cache (`cached_vessels`), never the
+   live Signal Ocean API in the request path. `MatchingEngine.rank()`
+   scores every candidate and returns the top `MATCH_TOP_N` (default 5).
 4. **Persist matches** — one `match_results` row per ranked vessel,
    denormalised (vessel snapshot copied in) so history survives cache
-   changes.
+   changes. Also skipped when parsing failed (ADR 0007, pending).
 5. **Push** — `NEW_MATCHES` JSON payload broadcast to every connected
    `/ws` WebSocket client (the Electron panel), via
    `run_coroutine_threadsafe` onto the main event loop captured at
    `lifespan` startup (ADR 0003) — safe to call from either worker-thread
-   call site above.
+   call site above. Runs unconditionally even on parse failure (broker
+   still sees the message arrived), with `matches: []` in that case.
 
 ### Matching engine (`middleware/matching/engine.py`)
 
@@ -150,6 +156,22 @@ penalising vessels/orders with gaps. `database/seed.py` embeds a
 the full app stack — if you change scoring weights or logic in
 `matching/engine.py`, check whether `database/seed.py` needs the same edit
 or seeded data will silently disagree with the live engine.
+
+**Known gap (designed, not yet fixed — ADR 0007, 2026-07-30):** found while
+testing the running app under this environment's invalid
+`ANTHROPIC_API_KEY`. When an order fails to parse outright, `_process_inbound`
+today still runs `rank()` against an essentially empty `ParsedOrder`, and
+every sub-score above hits its neutral-0.5 fallback for every candidate
+vessel — producing a flat "50 SCORE" on all of them that is visually
+indistinguishable from a real, computed borderline match. Confirmed against
+this environment's dev DB: 5 zero-confidence orders had already produced 25
+such fabricated `MatchResult` rows. `.claude/decisions/0007-parse-failure-status-and-match-gating.md`
+designs the fix — a new `parse_status` field (`"success"`/`"failed"`) set
+in `llm_parser.py`, matching skipped entirely (not run-and-discarded) when
+parsing fails, `parse_status`/`parse_error` exposed on `GET /orders/latest`
+and `GET /matches/{order_id}`, and a new frontend `FailedParseNotice.jsx`
+state replacing the vessel list for these orders. Not yet implemented —
+route to `coder`.
 
 ### Signal Ocean integration (`middleware/signal_client/client.py`)
 
@@ -382,6 +404,7 @@ Route resolution to `architect` unless noted otherwise.
 | IMAP UID stability as the `source_message_id` dedup key on a real (non-mock) mailbox — `middleware/mcp/imap_client.py` supplies the UID as the id, `scheduler/jobs.py::_poll_imap_inbox` dedupes against it via `InboundOrder.source_message_id`; a `UIDVALIDITY` reset on the broker's mail server could reassign UIDs and defeat dedup | ADR 0002, Open questions #1 | Not a blocker for `IMAP_MODE=mock` (fixed ids) or initial live rollout; resolved once `debug` tests against the real WT3 mailbox before go-live and confirms UID reuse doesn't occur across a `UIDVALIDITY` reset — or `imap_client.py` is changed to hash the `Message-ID` header as a more robust key instead |
 | Whether `middleware/api/app.py::_broadcast_new_matches` should batch multiple pending payloads if several orders complete in a very tight window, rather than scheduling one coroutine per order | ADR 0003, Open questions #1 | Not addressed in ADR 0003 — current ingestion rate (one broker mailbox, `imap_poll_interval_minutes=2`) makes this a non-issue in practice; revisit only if push volume grows |
 | Whether the Electron panel needs a missed-broadcast recovery path (e.g. catch up via `/orders/latest` on reconnect) | ADR 0003, Open questions #2 | Low priority — not in scope of the ADR 0003 fix, which restores real-time delivery only |
+| **ADR 0007 (parse-failure `parse_status` + match gating) is designed but not implemented** — `_process_inbound` still runs matching against failed parses today and will keep producing fabricated 50%-score `MatchResult` rows until `coder` builds it | ADR 0007 | Route to `coder`. Also unresolved within the ADR itself: whether failed parses should ever auto-retry (open question #1), whether a third `parse_status` value will eventually be needed to distinguish infra-down vs. single-bad-message failures (open question #2), and whether `OrderList.jsx` should triage/surface failed orders beyond per-row styling (open question #3) |
 
 **Resolved (2026-07-28):** `GET /status`'s 500 (`TypeError: can't subtract
 offset-naive and offset-aware datetimes`), found while testing the
