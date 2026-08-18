@@ -17,17 +17,17 @@ The broker's inbox tool, Telix WT3, has no public API. There was no vendor-suppo
 Maritime Middleware watches the broker's mailbox, parses each inbound order using an LLM, scores it against live vessel availability across four weighted dimensions, and surfaces ranked matches inside a companion email client — in real time, with no change to how the broker actually works. They open an email; the matches are already there.
 
 ```
-Telix WT3 ──▶ IMAP Mailbox ──▶ IMAP MCP Server ──▶ Claude (parsing)
-                                                          │
-                                              Signal Ocean API ──┐
-                                                                  ▼
-                                                          Python Backend
-                                                       (matching engine, DB)
-                                                          │         │
-                                                   PostgreSQL   WebSocket
-                                                                     │
-                                                                     ▼
-                                                          Electron Panel (UI)
+Telix WT3 → IMAP Mailbox → IMAP MCP Server → Claude (parsing)
+                                                    │
+                                    Signal Ocean API ──┐
+                                                        ▼
+                                                Python Backend
+                                             (matching engine, DB)
+                                                    │        │
+                                             PostgreSQL   WebSocket
+                                                                │
+                                                                ▼
+                                                    Electron Panel (UI)
 ```
 
 No GUI automation, no mail-server plugin — ingestion and delivery both run over standard mail protocols (IMAP/SMTP), which is the only integration surface a legacy, API-less tool like Telix WT3 actually exposes.
@@ -35,7 +35,7 @@ No GUI automation, no mail-server plugin — ingestion and delivery both run ove
 ## Key features
 
 - **Real-time ingestion** — a background poller watches the mailbox and feeds new orders into the pipeline within seconds of arrival
-- **LLM-based parsing** — extracts cargo type, quantity, ports, and laycan dates from free-text broker shorthand (e.g. `"55k grain ant/jpn lc aug 10-20"`), with per-field confidence scoring
+- **LLM-based parsing** — extracts cargo type, quantity, ports, and laycan dates from free-text broker shorthand (e.g. "55k grain ant/jpn lc aug 10-20"), with per-field confidence scoring
 - **Weighted vessel matching** — scores candidate vessels across size, geography, laycan overlap, and cargo compatibility; configurable weights, sub-100ms match latency against a local cache
 - **Full email-client capability** — threaded replies (RFC 2822 compliant), SMTP send, inbox/sent folders, read/unread state — not just a read-only dashboard
 - **Fails safely, not silently** — every external dependency (mail server, market data API, LLM) can fail without corrupting state or hiding the failure from the operator
@@ -50,17 +50,19 @@ No GUI automation, no mail-server plugin — ingestion and delivery both run ove
 | **Email Client UI** | Electron + React — real-time order list, match panel, compose/reply |
 | **Agent System** | Claude Code, 5 specialized agents — architecture, implementation, QA, reporting, coordination |
 
-Two [Model Context Protocol](https://modelcontextprotocol.io) servers expose the mailbox and market data as structured tools for interactive/agentic use; the production ingestion path runs independently as a scheduled backend job, not an agentic loop — a deliberate reliability decision documented in [`ADR 0002`](.claude/decisions/).
+Two [Model Context Protocol](https://modelcontextprotocol.io) servers expose the mailbox and market data as structured tools for interactive/agentic use; the production ingestion path runs independently as a scheduled backend job, not an agentic loop — a deliberate reliability decision documented in ADR 0002 below.
 
 ## Engineering process
 
-Every non-trivial architectural or scope decision is documented as an Architecture Decision Record before implementation — 7 ADRs across this project, covering everything from the core ingestion strategy to a UX gap caught by manual testing after full automated test coverage had already passed. See [`.claude/decisions/`](.claude/decisions/).
+Every non-trivial architectural or scope decision is documented as an Architecture Decision Record before implementation — 7 ADRs across this project. See [`.claude/decisions/`](.claude/decisions/).
 
 A few of the more interesting ones:
 
-- **[ADR 0002](.claude/decisions/)** — chose a scheduled polling job over an agentic MCP loop for production ingestion, since MCP servers are host-driven and require a live session — a reliability regression for something that needs to run unattended
-- **[ADR 0003](.claude/decisions/)** — fixed a cross-thread concurrency bug where WebSocket notifications silently failed to deliver under Python's asyncio threading model, and eliminated a related unguarded race condition in the same redesign
-- **[ADR 0007](.claude/decisions/)** — closed a data-integrity gap where a failed parse produced a match score visually indistinguishable from a genuine result, caught by manual inspection of the running app after 100+ automated tests had already passed
+- **[ADR 0001](.claude/decisions/0001-ingestion-imap-mcp.md)** — established IMAP as the sole ingestion mechanism, replacing an earlier mail-server-plugin approach
+- **[ADR 0002](.claude/decisions/0002-mcp-ingestion-pipeline-wiring.md)** — chose a scheduled polling job over an agentic MCP loop for production ingestion, since MCP servers are host-driven and require a live session — a reliability regression for something that needs to run unattended
+- **[ADR 0003](.claude/decisions/0003-websocket-broadcast-thread-safety.md)** — fixed a cross-thread concurrency bug where WebSocket notifications silently failed to deliver under Python's asyncio threading model, and eliminated a related unguarded race condition in the same redesign
+- **[ADR 0004](.claude/decisions/0004-smtp-send-and-wt3-clone-email-client.md)** — designed SMTP-based reply sending and the full email-client feature set (threading, folders, read state)
+- **[ADR 0007](.claude/decisions/0007-parse-failure-status-and-match-gating.md)** — closed a data-integrity gap where a failed parse produced a match score visually indistinguishable from a genuine result, caught by manual inspection of the running app after 100+ automated tests had already passed
 
 A second, independent bug — a cache-refresh job silently logging success while deleting real cached data on partial API failure — was found via the project's own daily-briefing agent and fixed the same day.
 
